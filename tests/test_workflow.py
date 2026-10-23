@@ -182,12 +182,35 @@ async def test_partial_receipt_does_not_hide_operation(svc):
     original = svc.gateway.oms
     async def oms(inn, path, *args, **kwargs):
         if path.endswith('/receipt'):
-            return {'results': [{'sourceDocId': svc.job(job['id'])['remote_id'], 'state': 'PARTIALLY_SUCCESS', 'code': 1}]}
+            return {'results': [{'resultDocId': svc.job(job['id'])['remote_id'], 'sourceDocId':str(uuid4()), 'state': 'PARTIALLY_SUCCESS', 'code': 1}]}
         return await original(inn, path, *args, **kwargs)
     svc.gateway.oms = oms
     await svc.poll_report(job['id'])
     assert svc.operation(op['id'])['state'] == 'report_pending'
     assert svc.job(job['id'])['state'] == 'accepted'
+
+
+@pytest.mark.parametrize('case', ['success', 'unrelated', 'source_only', 'conflict'])
+async def test_receipt_matches_result_id_not_source_id(svc, case):
+    op = await issue(svc)
+    job = (await svc.prepare_reports([op['id']], True))[0]
+    await svc.submit(job['id'], 'demo')
+    remote_id = svc.job(job['id'])['remote_id']
+    original = svc.gateway.oms
+    async def oms(inn, path, *args, **kwargs):
+        if path.endswith('/receipt'):
+            receipt = dict(resultDocId=remote_id, sourceDocId=str(uuid4()), state='SUCCESS', code=0)
+            if case == 'unrelated': receipt['resultDocId'] = str(uuid4())
+            if case == 'source_only':
+                receipt['resultDocId'] = str(uuid4()); receipt['sourceDocId'] = remote_id
+            rows = [receipt]
+            if case == 'conflict': rows.append(receipt | {'state':'PARTIALLY_SUCCESS', 'code':1})
+            return {'results':rows}
+        return await original(inn, path, *args, **kwargs)
+    svc.gateway.oms = oms
+    await svc.poll_report(job['id'])
+    assert svc.operation(op['id'])['state'] == ('done' if case == 'success' else 'report_pending')
+    assert svc.job(job['id'])['state'] == ('done' if case == 'success' else 'accepted')
 
 
 async def test_external_balance_change_blocks_report(svc):

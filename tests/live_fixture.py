@@ -72,7 +72,7 @@ class LiveFixture:
             return httpx.Response(200,json={'reportStatus':'SUCCESS'})
         if path=='/api/v3/receipts/receipt':
             self.quantity=100-self.separated
-            return httpx.Response(200,json={'results':[{'sourceDocId':self.report_id,'state':'SUCCESS','code':0}]})
+            return httpx.Response(200,json={'results':[{'resultDocId':self.report_id,'sourceDocId':str(uuid4()),'state':'SUCCESS','code':0}]})
         raise AssertionError(str(request.url))
 
     def gateway(self, settings, store):

@@ -80,7 +80,7 @@ async function reload() {
     info.append(el('strong',kindName(job.kind)+' · '+orgName(job.inn)),el('p',job.remote_id||job.id),badge(job.state));
     if(job.error) info.append(el('p',job.error));
     if(job.state==='prepared') row.append(button('Открыть и подписать',()=>openSign(job.id),'primary'));
-    if(job.kind==='report'&&job.state==='accepted') row.append(button('Проверить результат',async()=>{const value=await api('/api/reports/'+job.id+'/poll',{}); notice(value.state==='done'?'Нанесение подтверждено. Операции перенесены в историю.':(value.error||'Отчёт ещё обрабатывается')); await reload();}));
+    if(job.kind==='report'&&job.state==='accepted') row.append(button('Проверить результат',async()=>{const value=await api('/api/reports/'+job.id+'/poll',{}); notice(value.state==='done'?'Нанесение подтверждено. Операции перенесены в историю.':(value.error||'Отчёт ещё обрабатывается'),Boolean(value.error)); await reload();}));
     if(job.kind==='order'&&['unknown','sending'].includes(job.state)) row.append(button('Указать ID из ЛК',async()=>{const id=prompt('ID заказа из ЛК СУЗ. Сверьте productionOrderId с ID операции: '+job.target); if(id){await api('/api/jobs/'+job.id+'/recover',{remote_id:id}); await reload();}}));
     item.append(info,row); $('jobs').append(item);
   }

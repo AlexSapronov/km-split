@@ -196,7 +196,7 @@ class Gateway:
             if path == '/api/v3/report/info':
                 return {'reportStatus': 'SUCCESS'}
             if path == '/api/v3/receipts/receipt':
-                return {'results': [{'sourceDocId': params['resultDocId'], 'state': 'SUCCESS', 'code': 0}]}
+                return {'results': [{'resultDocId': params['resultDocId'], 'sourceDocId': str(uuid4()), 'state': 'SUCCESS', 'code': 0}]}
             raise ValueError('Unknown demo endpoint')
         headers = {'clientToken': self.token(inn, 'oms'), 'Accept': 'application/json'}
         if body is not None:

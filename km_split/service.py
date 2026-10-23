@@ -309,7 +309,9 @@ class Service:
             return self.job_view(job_id)
         if status == 'SUCCESS':
             receipts = await self.gateway.oms(job['inn'], '/api/v3/receipts/receipt', {'resultDocId': job['remote_id']})
-            relevant = [r for r in receipts.get('results', []) if r.get('sourceDocId') == job['remote_id']]
+            # Receipting 2.0: resultDocId identifies the requested receipt;
+            # sourceDocId identifies its separate transaction start document.
+            relevant = [r for r in receipts.get('results', []) if r.get('resultDocId') == job['remote_id']]
             if not relevant or any(r.get('state') != 'SUCCESS' or r.get('code') != 0 for r in relevant):
                 # Includes partial completion and conflicting receipts: keep visible.
                 with self.store.transaction() as db:
