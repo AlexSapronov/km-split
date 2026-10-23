@@ -1,1 +1,11 @@
-#configurationDialog{width:720px;max-height:90dvh;overflow:auto}#configurationDialog>form>select{width:100%}#saveConfiguration{display:block;margin-top:24px;width:100%}.organizationEdit{border:1px solid var(--border);border-radius:9px;padding:18px;margin:20px 0}.organizationEdit legend{font-weight:700;color:var(--text)}.organizationEdit input,.organizationEdit select{width:100%}.organizationEdit label{margin-top:13px}.organizationEdit details{margin-top:20px}#setupHint{display:flex;align-items:center;justify-content:space-between;gap:15px;font-size:14px}#splitError,#configurationError{margin:15px 0}#createSplit:disabled{cursor:wait}body[aria-busy=true]{cursor:progress}@media(max-width:700px){#setupHint{align-items:stretch;flex-direction:column}.organizationEdit{padding:12px}}
+.admin-main{max-width:860px}
+.admin-main label{display:block;font-size:14px;font-weight:650;margin:18px 0 9px}
+#workMode{width:100%}
+#saveConfiguration{display:block;margin-top:24px;width:100%}
+.organizationEdit{border:1px solid var(--border);border-radius:9px;padding:18px;margin:20px 0;min-width:0}
+.organizationEdit legend{font-weight:700;color:var(--text)}
+.organizationEdit input,.organizationEdit select{width:100%}
+.organizationEdit label{margin-top:13px}
+.organizationEdit details{margin-top:20px}
+#configurationError{margin:15px 0}
+@media(max-width:700px){.organizationEdit{padding:12px}}

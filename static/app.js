@@ -1,7 +1,7 @@
 'use strict';
 const $ = id => document.getElementById(id);
 window.GisTheme?.bind($('theme-btn'));
-let state, history = false, scanned = null, currentJob = null, busy = false, configuration = null;
+let state, history = false, scanned = null, currentJob = null, busy = false;
 const labels = {
   awaiting_signature: ['Подписать заказ', 'warning'], order_sending: ['Отправка заказа', 'warning'],
   order_unknown: ['Результат заказа неизвестен', 'error'], order_rejected: ['Заказ отклонён', 'error'],
@@ -18,7 +18,7 @@ function el(tag, text, cls) { const e = document.createElement(tag); if(text !==
 function notice(message, error=false) {
   $('notice').textContent = message; $('notice').className = error?'error':''; $('notice').hidden=false;
   if(error) {
-    const target=$('configurationDialog').open?$('configurationError'):$('signDialog').open?$('signError'):$('splitDialog').open?$('splitError'):null;
+    const target=$('signDialog').open?$('signError'):$('splitDialog').open?$('splitError'):null;
     if(target) {target.textContent=message;target.hidden=false;target.scrollIntoView({block:'nearest'});}
     else $('notice').scrollIntoView({block:'nearest'});
   }
@@ -50,9 +50,7 @@ async function reload() {
   $('mode').textContent=state.mode==='demo'?'ДЕМО · без ЧЗ':'ЧЗ · рабочий режим';
   $('mode').className='badge '+(state.mode==='demo'?'warning':'');
   $('demoScan').hidden=state.mode!=='demo';
-  const setup=state.mode==='demo'||!state.organizations.length;
-  $('setupHint').hidden=!setup;
-  $('setupHintText').textContent=state.mode==='demo'?'Сейчас включена демонстрация. Для реального товара переключитесь в рабочий режим.':'Добавьте ваши организации и параметры СУЗ, затем подключите ЧЗ по ЭЦП.';
+  $('setupHint').hidden=state.mode==='demo'||state.organizations.length>0;
   $('activeTab').classList.toggle('selected',!history); $('historyTab').classList.toggle('selected',history);
   $('listTitle').textContent=history?'История разделений':'Ожидают завершения';
   $('counts').textContent=state.operations.length+' операций · показаны последние 500';
@@ -72,7 +70,7 @@ async function reload() {
   }
   updateSelected();
   $('jobs').replaceChildren();
-  const jobs=state.jobs.filter(j=>j.kind!=='order'||j.state!=='accepted');
+  const jobs=state.jobs.filter(j=>j.kind.startsWith('auth_')?j.state==='prepared':!['done','cancelled'].includes(j.state)&&!(j.kind==='order'&&j.state==='accepted'));
   $('jobsSection').hidden=!jobs.length;
   for(const job of jobs) {
     const item=el('div',undefined,'job'), info=el('div'), row=el('div',undefined,'row');
@@ -127,53 +125,6 @@ $('splitForm').onsubmit=e=>{e.preventDefault(); action(async()=>{
   } finally {$('createSplit').disabled=false;}
 });};
 
-function editorRow(org={}) {
-  const row=el('fieldset',undefined,'organizationEdit');
-  row.append(el('legend','Организация'));
-  const defaults={true_api_url:'https://markirovka.crpt.ru',oms_url:'https://suzgrid.crpt.ru',template_id:36};
-  const fields=[['name','Наименование'],['inn','ИНН'],['oms_id','OMS ID — идентификатор СУЗ'],['oms_connection','OMS Connection — идентификатор подключения']];
-  const appendField=(key,label,parent=row)=>{
-    const id='org-'+key+'-'+document.querySelectorAll('.organizationEdit').length+'-'+row.querySelectorAll('input').length;
-    const input=el('input');input.id=id;input.dataset.field=key;input.value=org[key]??defaults[key]??'';
-    input.autocomplete='off';input.spellcheck=false;
-    const title=el('label',label);title.htmlFor=id;parent.append(title,input);return input;
-  };
-  for(const [key,label] of fields) appendField(key,label);
-  const label=el('label','Шаблон нового КМ'),select=el('select');select.dataset.field='template_id';
-  for(const [id,title] of [[36,'36 · длинный криптохвост 91/92'],[37,'37 · короткий криптохвост 93']]) {const option=el('option',title);option.value=id;select.append(option);}
-  select.value=org.template_id??36;label.append(select);row.append(label);
-  const advanced=el('details'),summary=el('summary','Адреса API и владелец карточки (при необходимости)');advanced.append(summary);
-  appendField('true_api_url','Базовый адрес True API',advanced);appendField('oms_url','Базовый адрес СУЗ',advanced);appendField('producer_inn','ИНН владельца карточки (необязательно)',advanced);row.append(advanced);
-  const remove=el('button','Убрать организацию','quiet');remove.type='button';remove.onclick=()=>row.remove();row.append(remove);
-  $('organizationEditor').append(row);
-}
-async function openConfiguration() {
-  configuration=await api('/api/settings');
-  $('workMode').value=configuration.mode;
-  $('organizationEditor').replaceChildren();
-  for(const org of configuration.organizations) editorRow(org);
-  if(!configuration.organizations.length) editorRow();
-  $('bridgeStatus').textContent=configuration.crypto_bridge_installed?'Скрипт КриптоПро установлен на VPS.':'Для подписи в браузере установите мост КриптоПро на VPS: bash /opt/km-split/scripts/install-crypto-bridge.sh';
-  $('configurationError').hidden=true;$('configurationDialog').showModal();
-}
-$('configurationToggle').onclick=()=>action(openConfiguration);$('setupOpen').onclick=()=>action(openConfiguration);
-$('closeConfiguration').onclick=()=>{$('configurationDialog').close();$('scan').focus();};
-$('addOrganization').onclick=()=>editorRow();
-$('configurationForm').onsubmit=e=>{e.preventDefault();action(async()=>{
-  $('configurationError').hidden=true;
-  const organizations=[];
-  for(const row of document.querySelectorAll('.organizationEdit')) {
-    const org={};for(const input of row.querySelectorAll('[data-field]'))org[input.dataset.field]=input.value.trim();
-    if(!org.name&&!org.inn&&!org.oms_id&&!org.oms_connection)continue;
-    org.template_id=Number(org.template_id);if(!org.producer_inn)delete org.producer_inn;organizations.push(org);
-  }
-  const mode=$('workMode').value;
-  if(mode==='live'&&configuration.mode!=='live'&&!confirm('Включить рабочий режим? Заказы и отчёты после подписи будут отправляться в настоящий ЧЗ.'))return;
-  configuration=await api('/api/settings',{mode,organizations,revision:configuration.revision});
-  $('configurationDialog').close();scanned=null;currentJob=null;history=false;sessionStorage.removeItem('splitDraft');
-  $('scan').value='';await reload();$('access').hidden=false;
-  notice(mode==='live'?'Рабочий режим включён. Подключите ГИС МТ и СУЗ вашей организации по ЭЦП.':'Демонстрационный режим включён. Рабочие данные сохранены отдельно.');
-});};
 $('prepareReport').onclick=()=>action(async()=>{
   const ids=Array.from(document.querySelectorAll('#operations input:checked'),e=>e.value);
   if(!confirm('Подтверждаете, что этикетки по выбранным операциям ('+ids.length+') напечатаны и нанесены на отделённый товар?')) return;

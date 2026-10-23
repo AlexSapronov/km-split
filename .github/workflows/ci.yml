@@ -13,6 +13,7 @@ jobs:
       - run: python -m pytest -q
       - run: node --check static/app.js
       - run: node --check static/theme.js
+      - run: node --check static/admin.js
       - run: python -m playwright install --with-deps chromium
       - run: python tests/browser_smoke.py
       - run: python tests/browser_live.py

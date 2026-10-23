@@ -26,6 +26,9 @@ def test_default_boot_needs_no_password_or_org_file(tmp_path, monkeypatch):
     assert settings.mode == 'live'
     with TestClient(create_app(settings)) as session:
         assert session.get('/').status_code == 200
+        assert session.get('/admin').status_code == 200
+        assert 'configurationForm' not in session.get('/').text
+        assert 'configurationForm' in session.get('/admin').text
         state = session.get('/api/state').json()
         assert state['mode'] == 'live' and state['organizations'] == []
         result = session.post('/api/scan', json={'code':'x'}, headers={'X-Requested-With':'km-split'})

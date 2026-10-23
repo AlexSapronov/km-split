@@ -111,6 +111,10 @@ def create_app(settings=None, gateway_factory=Gateway):
     async def index():
         return FileResponse(ROOT / 'static/index.html')
 
+    @app.get('/admin')
+    async def admin():
+        return FileResponse(ROOT / 'static/admin.html')
+
     @app.get('/api/state')
     async def state(history: bool = False):
         return service.state(history)
