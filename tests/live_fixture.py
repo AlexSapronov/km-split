@@ -10,7 +10,7 @@ NEW = '010464063834521821' + '5NEW'.ljust(20, '0') + GS + '91EE12' + GS + '92' +
 
 
 class LiveFixture:
-    def __init__(self):
+    def __init__(self, reject_oms_auth_once=False):
         self.calls=[]
         self.quantity=100
         self.separated=None
@@ -18,6 +18,7 @@ class LiveFixture:
         self.report_id=str(uuid4())
         self.block_id=str(uuid4())
         self.inn='7700000000'
+        self.reject_oms_auth_once=reject_oms_auth_once
 
     def handle(self, request):
         self.calls.append(request)
@@ -30,6 +31,9 @@ class LiveFixture:
             if path.endswith('/auth/simpleSignIn'):
                 assert body['unitedToken'] is True
                 return httpx.Response(200,json={'uuidToken':'fixture-true-token'})
+            if self.reject_oms_auth_once:
+                self.reject_oms_auth_once=False
+                return httpx.Response(400,json={'code':'003','error_message':'Идентификатор соединения для указанного УОТ не найден'})
             return httpx.Response(200,json={'token':'fixture-oms-token'})
         if path.endswith('/cises/info'):
             assert request.headers['Authorization']=='Bearer fixture-true-token'
@@ -76,5 +80,6 @@ class LiveFixture:
 
 
 def create_fixture_app():
+    import os
     from main import create_app
-    return create_app(gateway_factory=LiveFixture().gateway)
+    return create_app(gateway_factory=LiveFixture(os.getenv('SPLIT_FIXTURE_AUTH_REJECTION')=='1').gateway)

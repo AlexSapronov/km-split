@@ -1,5 +1,6 @@
 'use strict';
 const $ = id => document.getElementById(id);
+window.GisTheme?.bind($('theme-btn'));
 let state, history = false, scanned = null, currentJob = null, busy = false, configuration = null;
 const labels = {
   awaiting_signature: ['Подписать заказ', 'warning'], order_sending: ['Отправка заказа', 'warning'],
@@ -26,17 +27,20 @@ async function api(path, body) {
   const options = {credentials:'same-origin', headers:{'X-Requested-With':'km-split'}};
   if(state) options.headers['X-Split-Mode']=state.mode;
   if(body !== undefined) { options.method='POST'; options.headers['Content-Type']='application/json'; options.body=JSON.stringify(body); }
-  const r = await fetch(path, options);
+  let r;
+  try { r = await fetch(path, options); }
+  catch(error) { $('connection').dataset.state='offline'; $('connection').textContent='Нет связи с сервером'; throw error; }
+  $('connection').dataset.state='online'; $('connection').textContent='Сервер доступен';
   let value; try { value=await r.json(); } catch { throw new Error('Не удалось прочитать ответ сервера'); }
   if(!r.ok) throw new Error(typeof value.detail==='string'?value.detail:(Array.isArray(value.detail)?value.detail.map(e=>e.msg).join('; '):'Некорректные данные запроса'));
   return value;
 }
 async function action(fn) {
   if(busy) return;
-  busy=true;
+  busy=true; $('busy-state').hidden=false;
   document.body.setAttribute('aria-busy','true');
   try { await fn(); } catch(e) { notice(e.message || String(e), true); }
-  finally { busy=false; document.body.removeAttribute('aria-busy'); }
+  finally { busy=false; $('busy-state').hidden=true; document.body.removeAttribute('aria-busy'); }
 }
 function button(text, fn, cls='secondary') { const b=el('button',text,cls); b.type='button'; b.onclick=()=>action(fn); return b; }
 function badge(key) { const [text, cls]=labels[key]||[key,'neutral']; return el('span',text,'badge '+cls); }
@@ -190,6 +194,7 @@ async function openSign(jobId) {
   $('demoSignNotice').hidden=state.mode!=='demo'; $('liveSign').hidden=state.mode==='demo';
   $('signingFile').href='/api/jobs/'+jobId+'/signing.json';
   $('signAndSubmit').disabled=false;
+  $('signAndSubmit').textContent='Подписать и отправить';$('cancelJob').hidden=false;
   if(!$('signDialog').open) $('signDialog').showModal();
 }
 $('closeSign').onclick=()=>{$('signDialog').close(); $('scan').focus();};
@@ -238,16 +243,26 @@ async function signWithPlugin(job) {
 $('signAndSubmit').onclick=()=>action(async()=>{
   $('signAndSubmit').disabled=true; $('signError').hidden=true;
   try {
+    if(currentJob.kind.startsWith('auth_')&&currentJob.state!=='prepared') {
+      const next=await api('/api/auth/'+currentJob.inn+'/'+currentJob.kind.slice(5),{});
+      await reload();await openSign(next.id);return;
+    }
     let signature='demo-signature';
     if(state.mode!=='demo') signature=$('signature').value.trim()||await signWithPlugin(currentJob);
     const job=await api('/api/jobs/'+currentJob.id+'/submit',{signature});
+    currentJob=job;
     if(['rejected','unknown','sending'].includes(job.state)) {throw new Error(job.error||'Результат неизвестен. Проверьте список заданий; повторная отправка заблокирована.');}
     $('signDialog').close(); notice(job.kind==='order'?'Заказ принят. Нажмите «Получить КМ», когда код будет готов.':job.kind==='report'?'Отчёт отправлен. Нажмите «Проверить результат».':'Доступ обновлён.');
     await reload();
     if(job.kind.startsWith('auth_')&&state.organizations.some(org=>org.inn===job.inn&&['true','oms'].every(kind=>org.tokens.some(token=>token.kind===kind))))$('access').hidden=true;
     $('scan').focus();
   } catch(e) {$('signError').textContent=e.message||String(e); $('signError').hidden=false; await reload();}
-  finally {$('signAndSubmit').disabled=false;}
+  finally {
+    $('signAndSubmit').disabled=false;
+    if(currentJob?.kind.startsWith('auth_')&&currentJob.state!=='prepared'&&$('signDialog').open) {
+      $('signAndSubmit').textContent='Получить новый запрос авторизации';$('cancelJob').hidden=true;
+    }
+  }
 });
 $('cancelJob').onclick=()=>action(async()=>{await api('/api/jobs/'+currentJob.id+'/cancel',{});$('signDialog').close();await reload();});
 window.addEventListener('focus',()=>{if(!$('splitDialog').open&&!$('signDialog').open&&document.activeElement===document.body)$('scan').focus();});

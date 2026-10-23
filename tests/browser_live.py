@@ -39,7 +39,7 @@ window.cadesplugin=Object.assign(Promise.resolve(),{CreateObjectAsync:async kind
 def main():
     with tempfile.TemporaryDirectory() as temp,socket.socket() as sock:
         sock.bind(('127.0.0.1',0));port=sock.getsockname()[1];sock.close()
-        env={**os.environ,'SPLIT_DATA':temp,'SPLIT_MODE':'live'}
+        env={**os.environ,'SPLIT_DATA':temp,'SPLIT_MODE':'live','SPLIT_FIXTURE_AUTH_REJECTION':'1'}
         server=subprocess.Popen([sys.executable,'-m','uvicorn','tests.live_fixture:create_fixture_app','--factory','--host','127.0.0.1','--port',str(port)],cwd=ROOT,env=env,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)
         base=f'http://127.0.0.1:{port}'
         try:
@@ -75,6 +75,12 @@ def main():
                 page.locator('#certificate').select_option('FAKE-TEST-CERT')
                 page.locator('#signAndSubmit').click();expect(page.locator('#signDialog')).not_to_be_visible()
                 page.get_by_role('button',name='Подключить СУЗ',exact=True).click()
+                page.locator('#signAndSubmit').click()
+                expect(page.locator('#signError')).to_contain_text('003')
+                expect(page.locator('#signError')).to_contain_text('Идентификатор соединения')
+                expect(page.locator('#signAndSubmit')).to_have_text('Получить новый запрос авторизации')
+                page.locator('#signAndSubmit').click()
+                expect(page.locator('#signAndSubmit')).to_have_text('Подписать и отправить')
                 page.locator('#signAndSubmit').click();expect(page.locator('#signDialog')).not_to_be_visible()
                 page.locator('#scan').fill(SOURCE.replace('\x1d',''));page.locator('#scan').press('Enter')
                 expect(page.locator('#splitDialog')).to_be_visible();expect(page.locator('#splitPN')).to_have_text('PILOT-PN-100')
@@ -96,7 +102,7 @@ def main():
                 expect(page.locator('#operations tr')).to_have_count(0)
                 page.locator('#historyTab').click();expect(page.locator('#operations')).to_contain_text('Успешно нанесено')
                 signatures=page.evaluate('window.testSignatures')
-                assert [s['detached'] for s in signatures]==[False,False,True,True]
+                assert [s['detached'] for s in signatures]==[False,False,False,True,True]
                 assert not errors,errors
                 browser.close()
             print('Live UI acceptance passed: configure → EDS auth (attached) → issue (detached) → PDF → DIVISIONMARK (detached) → receipt → history. CRPT and EDS simulated.')

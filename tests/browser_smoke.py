@@ -45,6 +45,14 @@ def main():
                     print('Page errors:',errors,'Notice:',page.locator('#notice').inner_text());raise
                 assert not page.evaluate('window.isSecureContext')
                 assert page.evaluate('typeof crypto.randomUUID') == 'undefined'
+                expect(page.locator('#connection')).to_have_text('Сервер доступен')
+                expect(page.locator('html')).to_have_attribute('data-theme','light')
+                page.locator('#theme-btn').click()
+                expect(page.locator('html')).to_have_attribute('data-theme','dark')
+                page.reload()
+                expect(page.locator('html')).to_have_attribute('data-theme','dark')
+                expect(page.locator('#mode')).to_contain_text('ДЕМО')
+                page.locator('#theme-btn').click()
                 page.locator('#demoScan').click(); expect(page.locator('#splitDialog')).to_be_visible()
                 expect(page.locator('#originalQuantity')).to_have_text('100')
                 page.locator('#quantity').fill('30'); expect(page.locator('#remain')).to_contain_text('70')
@@ -78,7 +86,14 @@ def main():
                     folder=Path(screenshots);folder.mkdir(parents=True,exist_ok=True)
                     page.screenshot(path=str(folder/'split-dialog.png'),full_page=True)
                 page.locator('#closeSplit').click()
-                if screenshots: page.screenshot(path=str(folder/'warehouse.png'),full_page=True)
+                if screenshots:
+                    page.screenshot(path=str(folder/'warehouse-light.png'),full_page=True)
+                    page.locator('#theme-btn').click()
+                    page.screenshot(path=str(folder/'warehouse-dark.png'),full_page=True)
+                    page.set_viewport_size({'width':390,'height':844})
+                    page.screenshot(path=str(folder/'warehouse-mobile.png'),full_page=True)
+                page.set_viewport_size({'width':390,'height':844})
+                assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
                 assert not errors,errors
                 browser.close()
             print('Browser acceptance passed on insecure LAN HTTP, no login: scan → signature → code → PDF → report → receipt → history; residual 70; modal errors visible.')

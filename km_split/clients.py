@@ -1,5 +1,6 @@
 """Only the server talks to True API/OMS. No mutating request is retried."""
 import json
+import re
 from uuid import uuid4
 import httpx
 from .codes import parse
@@ -9,6 +10,53 @@ class RemoteError(Exception):
     def __init__(self, message, uncertain=False):
         super().__init__(message)
         self.uncertain = uncertain
+
+
+def error_detail(payload, sensitive=()):
+    """Only documented diagnostic fields; never dump response or signed request."""
+    parts = []
+    def collect(value, depth=0):
+        if depth > 2 or not isinstance(value, dict):
+            return
+        for key in ('code', 'errorCode', 'error_code', 'error_message', 'errorMessage', 'message', 'description'):
+            item = value.get(key)
+            if isinstance(item, (str, int)) and not isinstance(item, bool) and str(item).strip():
+                text = str(item).strip()
+                if text not in parts:
+                    parts.append(text)
+        error = value.get('error')
+        if isinstance(error, str) and error.strip() and error not in parts:
+            parts.append(error.strip())
+        elif isinstance(error, dict):
+            collect(error, depth + 1)
+        if isinstance(value.get('errors'), list):
+            for item in value['errors'][:5]:
+                collect(item, depth + 1)
+    collect(payload)
+    text = '; '.join(parts)
+    for secret in sorted((s for s in sensitive if isinstance(s, str) and len(s) >= 8), key=len, reverse=True):
+        text = text.replace(secret, '[скрыто]')
+        text = text.replace(''.join(secret.split()), '[скрыто]')
+        text = text.replace(json.dumps(secret)[1:-1], '[скрыто]')
+    # Catch otherwise unknown CMS, certificates, JWTs, or tokens echoed in prose.
+    text = re.sub(r'\beyJ[A-Za-z0-9_.=-]{30,}', '[скрыто]', text)
+    text = re.sub(r'[A-Za-z0-9+/=_-]{80,}', '[скрыто]', text)
+    text = ''.join(c if c >= ' ' else ' ' for c in text)
+    return text[:1200]
+
+
+def request_secrets(body, headers):
+    sensitive = []
+    for key, value in (headers or {}).items():
+        if key.lower() in ('authorization', 'clienttoken', 'x-signature'):
+            sensitive.extend([value, value.removeprefix('Bearer ').removeprefix('token ')])
+    try:
+        data = json.loads(body) if body else {}
+        if isinstance(data, dict):
+            sensitive.extend(data.get(key) for key in ('uuid', 'data', 'signature', 'token', 'uuidToken'))
+    except (ValueError, TypeError):
+        pass
+    return sensitive
 
 
 class Gateway:
@@ -27,7 +75,7 @@ class Gateway:
             raise ValueError(f'Обновите доступ {"СУЗ" if kind == "oms" else "ГИС МТ"} для ИНН {inn}')
         return row['token']
 
-    async def request(self, method, url, headers=None, body=None, params=None, mutating=False):
+    async def request(self, method, url, headers=None, body=None, params=None, mutating=False, context='ЧЗ'):
         try:
             async with httpx.AsyncClient(timeout=httpx.Timeout(40, connect=10), transport=self.transport,
                                          follow_redirects=False) as client:
@@ -36,8 +84,13 @@ class Gateway:
             raise RemoteError('Нет подтверждения от ЧЗ. Проверьте состояние операции перед повтором.' if mutating
                               else 'ЧЗ недоступен. Повторите проверку позже.', uncertain=mutating)
         if response.status_code not in (200, 201):
-            # Do not include raw bodies: gateways sometimes echo auth material.
-            raise RemoteError(f'ЧЗ вернул HTTP {response.status_code}. Проверьте доступ и квитанцию в ЛК.',
+            try:
+                diagnostic = error_detail(response.json(), request_secrets(body, headers))
+            except ValueError:
+                diagnostic = ''
+            message = f'{context}: HTTP {response.status_code}.'
+            message += (' ' + diagnostic) if diagnostic else ' ЧЗ не передал описание в распознанном формате.'
+            raise RemoteError(message,
                               uncertain=mutating and (response.status_code >= 500 or response.status_code in (408, 429)))
         try:
             result = response.json()
@@ -117,10 +170,15 @@ class Gateway:
         if job['kind'] == 'auth_true':
             body['unitedToken'] = True
         result = await self.request('POST', org['true_api_url'] + path,
-                                    headers={'Content-Type': 'application/json'}, body=json.dumps(body).encode())
+                                    headers={'Content-Type': 'application/json'}, body=json.dumps(body).encode(),
+                                    context='Авторизация СУЗ' if job['kind'] == 'auth_oms' else 'Авторизация ГИС МТ')
+        if not isinstance(result, dict):
+            raise RemoteError('ЧЗ вернул некорректный ответ авторизации. Получите новый запрос и повторите вход')
         token = result.get('token') if job['kind'] == 'auth_oms' else result.get('uuidToken')
         if not token:
-            raise ValueError('ЧЗ не вернул токен авторизации')
+            diagnostic = error_detail(result, (signature, challenge['uuid']))
+            raise RemoteError(('Авторизация СУЗ' if job['kind'] == 'auth_oms' else 'Авторизация ГИС МТ') +
+                              ': ' + (diagnostic or 'ЧЗ не вернул токен авторизации. Получите новый запрос и повторите вход'))
         return token
 
     async def oms(self, inn, path, params=None, body=None, signature=None):
