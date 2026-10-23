@@ -225,11 +225,12 @@ async def test_restart_preserves_pending_and_history(svc):
 def test_pdf_round_trip(tmp_path, raw):
     if not shutil.which('pdftoppm'): pytest.skip('Poppler required')
     full = with_quantity(raw, 354)
-    payload = render_label(full, 'ST01-0505XT', 354)
+    payload = render_label(full, 'Артикул ST01-0505XT', 354)
     page = PdfReader(BytesIO(payload)).pages[0]
     assert float(page.mediabox.width) == pytest.approx(58*72/25.4, abs=.001)
     assert float(page.mediabox.height) == pytest.approx(40*72/25.4, abs=.001)
     assert 'ST01-0505XT' in page.extract_text()
+    assert 'Артикул' not in page.extract_text()
     pdf = tmp_path / 'label.pdf'; pdf.write_bytes(payload)
     subprocess.run(['pdftoppm','-r','203','-singlefile','-png',str(pdf),str(tmp_path/'label')], check=True, capture_output=True)
     decoded = zxingcpp.read_barcode(Image.open(tmp_path/'label.png'))

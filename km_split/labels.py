@@ -1,6 +1,7 @@
 """Vector GS1 DataMatrix PDF; no bitmap resampling by a printer driver."""
 from io import BytesIO
 from pathlib import Path
+import re
 from reportlab.pdfgen.canvas import Canvas
 from reportlab.lib.units import mm
 from reportlab.pdfbase import pdfmetrics
@@ -67,6 +68,7 @@ def render_label(full_code: str, pn: str, quantity: int, demo=False) -> bytes:
     if logo.exists():
         c.drawImage(str(logo), text_x, 30 * mm, width=25 * mm, height=8.53 * mm, mask='auto')
     # Wrap long PN without clipping or shrinking it beyond legibility.
+    pn = re.sub(r'^\s*Артикул(?:\s*:\s*|\s+)(?=\S)', '', pn, count=1, flags=re.IGNORECASE)
     chunks, chunk = [], ''
     for char in pn:
         if pdfmetrics.stringWidth(chunk + char, font, 9) > width:

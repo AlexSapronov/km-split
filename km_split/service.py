@@ -288,7 +288,7 @@ class Service:
             raise ValueError('Новый КМ ещё не получен')
         labels = self.settings.data / 'labels'
         labels.mkdir(mode=0o700, exist_ok=True)
-        path = labels / (op_id + '.pdf')
+        path = labels / (op_id + '-v2.pdf')
         if not path.exists():
             payload = render_label(op['new_code'], op['pn'], op['quantity'], self.settings.mode == 'demo')
             temporary = path.with_suffix('.tmp-' + uuid4().hex)
