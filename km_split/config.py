@@ -15,6 +15,7 @@ class Settings:
     password: str
     organizations: list[dict]
     root: Path | None = None
+    file_signing_enabled: bool = False
 
     @staticmethod
     def validate_organizations(orgs):
@@ -55,6 +56,7 @@ class Settings:
             elif self.mode == 'live':
                 orgs = self.organizations
         return {'mode': self.mode, 'organizations': orgs or [],
+                'file_signing_enabled': self.file_signing_enabled,
                 'revision': hashlib.sha256(payload).hexdigest()}
 
     @classmethod
@@ -79,7 +81,7 @@ class Settings:
         else:
             orgs = [dict(inn='7700000000', name='Демо · склад', template_id=36)]
         # user/password are retained only for source compatibility with v0.1.
-        return cls(data, mode, '', '', orgs, root)
+        return cls(data, mode, '', '', orgs, root, saved.get('file_signing_enabled') is True)
 
     @classmethod
     def load(cls):

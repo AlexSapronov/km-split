@@ -39,6 +39,7 @@ function editorRow(org={}) {
 async function openConfiguration() {
   configuration=await api('/api/settings');
   $('workMode').value=configuration.mode;
+  $('fileSigningEnabled').checked=configuration.file_signing_enabled;
   $('organizationEditor').replaceChildren();
   for(const org of configuration.organizations) editorRow(org);
   if(!configuration.organizations.length) editorRow();
@@ -56,7 +57,7 @@ $('configurationForm').onsubmit=e=>{e.preventDefault();action(async()=>{
   }
   const mode=$('workMode').value;
   if(mode==='live'&&configuration.mode!=='live'&&!confirm('Включить рабочий режим? Заказы и отчёты после подписи будут отправляться в настоящий ЧЗ.'))return;
-  configuration=await api('/api/settings',{mode,organizations,revision:configuration.revision});
+  configuration=await api('/api/settings',{mode,organizations,file_signing_enabled:$('fileSigningEnabled').checked,revision:configuration.revision});
   notice(mode==='live'?'Настройки сохранены. На складском экране подключите ЧЗ по ЭЦП.':'Демонстрационный режим включён. Рабочие данные сохранены отдельно.');
 });};
 

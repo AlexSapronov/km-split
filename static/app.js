@@ -50,6 +50,9 @@ async function reload() {
   $('mode').textContent=state.mode==='demo'?'ДЕМО · без ЧЗ':'ЧЗ · рабочий режим';
   $('mode').className='badge '+(state.mode==='demo'?'warning':'');
   $('demoScan').hidden=state.mode!=='demo';
+  $('fileSigningHelp').hidden=!state.file_signing_enabled;
+  $('fileSigning').hidden=!state.file_signing_enabled;
+  if(!state.file_signing_enabled) { $('fileSigning').open=false; $('signature').value=''; $('signatureFile').value=''; }
   $('setupHint').hidden=state.mode==='demo'||state.organizations.length>0;
   $('activeTab').classList.toggle('selected',!history); $('historyTab').classList.toggle('selected',history);
   $('listTitle').textContent=history?'История разделений':'Ожидают завершения';
@@ -155,8 +158,8 @@ async function loadCrypto() {
   if(cryptoReady) return cryptoReady;
   cryptoReady=new Promise((resolve,reject)=>{
     const script=document.createElement('script'); script.src='/static/vendor/cadesplugin_api.js';
-    const timer=setTimeout(()=>reject(new Error('Плагин подписи не ответил. Используйте подпись через файл.')),22000);
-    script.onerror=()=>{clearTimeout(timer);reject(new Error('Скрипт КриптоПро не установлен на сервере. Используйте подпись через файл.'));};
+    const timer=setTimeout(()=>reject(new Error('Плагин подписи не ответил. Проверьте установку КриптоПро и расширения браузера.')),22000);
+    script.onerror=()=>{clearTimeout(timer);reject(new Error('Скрипт КриптоПро не установлен на сервере. Проверьте установку КриптоПро и расширения браузера.'));};
     // cadesplugin is itself a Promise decorated with API methods. Resolving a
     // Promise with it unwraps to undefined and loses CreateObjectAsync.
     script.onload=async()=>{try{await window.cadesplugin;clearTimeout(timer);resolve();}catch{clearTimeout(timer);reject(new Error('Установите КриптоПро ЭЦП Browser plug-in и расширение браузера'));}};
@@ -179,7 +182,7 @@ $('loadCertificates').onclick=()=>action(async()=>{
 });
 async function signWithPlugin(job) {
   const thumb=$('certificate').value;
-  if(!thumb) throw new Error('Выберите сертификат или загрузите подпись из файла');
+  if(!thumb) throw new Error('Выберите сертификат сотрудника');
   await loadCrypto();const cp=window.cadesplugin, store=await cp.CreateObjectAsync('CAdESCOM.Store'); await store.Open(2,'My',2);
   try {
     const all=await store.Certificates, found=await all.Find(0,thumb);
@@ -199,7 +202,7 @@ $('signAndSubmit').onclick=()=>action(async()=>{
       await reload();await openSign(next.id);return;
     }
     let signature='demo-signature';
-    if(state.mode!=='demo') signature=$('signature').value.trim()||await signWithPlugin(currentJob);
+    if(state.mode!=='demo') signature=(state.file_signing_enabled&&$('signature').value.trim())||await signWithPlugin(currentJob);
     const job=await api('/api/jobs/'+currentJob.id+'/submit',{signature});
     currentJob=job;
     if(['rejected','unknown','sending'].includes(job.state)) {throw new Error(job.error||'Результат неизвестен. Проверьте список заданий; повторная отправка заблокирована.');}

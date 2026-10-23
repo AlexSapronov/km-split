@@ -96,3 +96,30 @@ def test_cannot_change_live_configuration_with_unfinished_operation(tmp_path):
         reply=session.post('/api/settings',json={k:result[k] for k in ('mode','organizations','revision')}|{'mode':'demo'})
         assert reply.status_code==409
         assert session.get('/api/state').json()['mode']=='live'
+        # A UI option can change without disturbing an unfinished paid operation.
+        enabled=session.post('/api/settings',json={k:result[k] for k in ('mode','organizations','revision')}|{'file_signing_enabled':True})
+        assert enabled.status_code==200
+        assert store.one("SELECT state FROM operations WHERE id='op'")['state']=='ready'
+        assert session.get('/api/state').json()['file_signing_enabled'] is True
+
+
+def test_file_signing_is_opt_in_and_persisted(tmp_path):
+    with client(tmp_path) as session:
+        cfg=session.get('/api/settings').json()
+        assert cfg['file_signing_enabled'] is False
+        assert session.get('/api/sign-helper.ps1').status_code==409
+        job=session.post('/api/auth/7700000000/true',json={}).json()
+        url='/api/jobs/'+job['id']+'/signing.json'
+        assert session.get(url).status_code==409
+        body={k:cfg[k] for k in ('mode','organizations','revision')}
+        result=session.post('/api/settings',json=body|{'file_signing_enabled':True})
+        assert result.status_code==200
+        assert session.get(url).status_code==200
+        assert session.get('/api/sign-helper.ps1').status_code==200
+        assert session.get('/api/jobs/'+job['id']).json()['state']=='prepared'
+    with client(tmp_path) as session:
+        cfg=session.get('/api/settings').json()
+        assert cfg['file_signing_enabled'] is True
+        body={k:cfg[k] for k in ('mode','organizations','revision')}
+        assert session.post('/api/settings',json=body|{'file_signing_enabled':False}).status_code==200
+        assert session.get('/api/sign-helper.ps1').status_code==409

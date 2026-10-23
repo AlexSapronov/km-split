@@ -350,5 +350,6 @@ class Service:
         condition = "o.state IN ('done','cancelled')" if history else "o.state NOT IN ('done','cancelled')"
         operations = self.store.all('SELECT o.*,s.gtin FROM operations o JOIN sources s ON s.cis=o.source WHERE ' + condition + ' ORDER BY o.created DESC LIMIT 500')
         jobs = self.store.all("SELECT id,kind,inn,target,state,remote_id,error,created FROM jobs WHERE state NOT IN ('done','cancelled') ORDER BY created DESC LIMIT 500")
-        return {'mode': self.settings.mode, 'organizations': organizations, 'operations': operations, 'jobs': jobs,
+        return {'mode': self.settings.mode, 'file_signing_enabled': self.settings.file_signing_enabled,
+                'organizations': organizations, 'operations': operations, 'jobs': jobs,
                 'demo_code': '0104640638345218215DEMO000000000000000\u001d93dGVz\u001d30100' if self.settings.mode == 'demo' else None}

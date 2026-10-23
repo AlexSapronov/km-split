@@ -56,6 +56,7 @@ class Organization(Body):
 
 class Configuration(Body):
     mode: Literal['live', 'demo']
+    file_signing_enabled: bool = False
     organizations: list[Organization] = Field(max_length=30)
     revision: str = Field(min_length=64, max_length=64)
 
@@ -139,21 +140,26 @@ def create_app(settings=None, gateway_factory=Gateway):
         if body.mode == 'live' and not organizations:
             raise ValueError('Добавьте хотя бы одну организацию для рабочего режима')
         # Do not strand paid codes or route old signatures through changed settings.
-        if body.mode == settings.mode and organizations == current['organizations']:
+        operational_change = body.mode != settings.mode or organizations != current['organizations']
+        if not operational_change and body.file_signing_enabled == settings.file_signing_enabled:
             return await configuration()
-        if settings.mode == 'live' and service.store.one("SELECT id FROM operations WHERE state NOT IN ('done','cancelled') LIMIT 1"):
+        if operational_change and settings.mode == 'live' and service.store.one("SELECT id FROM operations WHERE state NOT IN ('done','cancelled') LIMIT 1"):
             raise ValueError('Есть незавершённые рабочие разделения. Завершите или разберите их перед сменой настроек')
-        if settings.mode == 'live' and service.store.one("SELECT id FROM jobs WHERE state='sending' LIMIT 1"):
+        if operational_change and settings.mode == 'live' and service.store.one("SELECT id FROM jobs WHERE state='sending' LIMIT 1"):
             raise ValueError('Дождитесь завершения отправки в ЧЗ')
         root = settings.root or settings.data
         config = root / 'configuration.json'
         old_bytes = config.read_bytes() if config.exists() else None
-        payload = json.dumps({'mode': body.mode, 'organizations': organizations}, ensure_ascii=False, indent=2)
+        payload = json.dumps({'mode': body.mode, 'organizations': organizations,
+                              'file_signing_enabled': body.file_signing_enabled}, ensure_ascii=False, indent=2)
         fd, temporary = tempfile.mkstemp(prefix='configuration-', suffix='.tmp', dir=root)
         try:
             with os.fdopen(fd, 'w', encoding='utf-8') as stream:
                 stream.write(payload); stream.flush(); os.fsync(stream.fileno())
             os.replace(temporary, config)
+            if not operational_change:
+                settings.file_signing_enabled = body.file_signing_enabled
+                return await configuration()
             try:
                 updated = Settings.from_root(root)
                 updated_store = Store(updated.data / 'split.sqlite3')
@@ -205,12 +211,16 @@ def create_app(settings=None, gateway_factory=Gateway):
 
     @app.get('/api/jobs/{job_id}/signing.json')
     async def signing_file(job_id: UUID):
+        if not settings.file_signing_enabled:
+            raise ValueError('Подпись через файл отключена в настройках')
         job = service.job_view(str(job_id))
         return JSONResponse({k: job[k] for k in ('id', 'kind', 'inn', 'organization', 'payload_base64', 'detached', 'sha256')},
                             headers={'Content-Disposition': f'attachment; filename="sign-{job_id}.json"'})
 
     @app.get('/api/sign-helper.ps1')
     async def helper():
+        if not settings.file_signing_enabled:
+            raise ValueError('Подпись через файл отключена в настройках')
         return FileResponse(ROOT / 'scripts/sign-job.ps1', filename='sign-job.ps1')
 
     @app.get('/api/operations/{op_id}/label.pdf')
