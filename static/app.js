@@ -1,6 +1,6 @@
 'use strict';
 const $ = id => document.getElementById(id);
-let state, history = false, scanned = null, currentJob = null, busy = false;
+let state, history = false, scanned = null, currentJob = null, busy = false, configuration = null;
 const labels = {
   awaiting_signature: ['Подписать заказ', 'warning'], order_sending: ['Отправка заказа', 'warning'],
   order_unknown: ['Результат заказа неизвестен', 'error'], order_rejected: ['Заказ отклонён', 'error'],
@@ -14,21 +14,28 @@ const labels = {
 };
 const kindName = kind => ({order:'Заказ нового КМ', report:'Отчёт о разделении', auth_true:'Авторизация ГИС МТ', auth_oms:'Авторизация СУЗ'})[kind] || kind;
 function el(tag, text, cls) { const e = document.createElement(tag); if(text !== undefined) e.textContent = text; if(cls) e.className = cls; return e; }
-function notice(message, error=false) { $('notice').textContent = message; $('notice').className = error?'error':''; $('notice').hidden=false; }
+function notice(message, error=false) {
+  $('notice').textContent = message; $('notice').className = error?'error':''; $('notice').hidden=false;
+  if(error) {
+    const target=$('configurationDialog').open?$('configurationError'):$('signDialog').open?$('signError'):$('splitDialog').open?$('splitError'):null;
+    if(target) {target.textContent=message;target.hidden=false;target.scrollIntoView({block:'nearest'});}
+    else $('notice').scrollIntoView({block:'nearest'});
+  }
+}
 async function api(path, body) {
   const options = {credentials:'same-origin', headers:{'X-Requested-With':'km-split'}};
+  if(state) options.headers['X-Split-Mode']=state.mode;
   if(body !== undefined) { options.method='POST'; options.headers['Content-Type']='application/json'; options.body=JSON.stringify(body); }
   const r = await fetch(path, options);
-  if(r.status===401) throw new Error('Войдите в приложение: обновите страницу.');
   let value; try { value=await r.json(); } catch { throw new Error('Не удалось прочитать ответ сервера'); }
-  if(!r.ok) throw new Error(typeof value.detail==='string'?value.detail:'Некорректные данные запроса');
+  if(!r.ok) throw new Error(typeof value.detail==='string'?value.detail:(Array.isArray(value.detail)?value.detail.map(e=>e.msg).join('; '):'Некорректные данные запроса'));
   return value;
 }
 async function action(fn) {
   if(busy) return;
   busy=true;
   document.body.setAttribute('aria-busy','true');
-  try { await fn(); } catch(e) { notice(e.message, true); }
+  try { await fn(); } catch(e) { notice(e.message || String(e), true); }
   finally { busy=false; document.body.removeAttribute('aria-busy'); }
 }
 function button(text, fn, cls='secondary') { const b=el('button',text,cls); b.type='button'; b.onclick=()=>action(fn); return b; }
@@ -39,6 +46,9 @@ async function reload() {
   $('mode').textContent=state.mode==='demo'?'ДЕМО · без ЧЗ':'ЧЗ · рабочий режим';
   $('mode').className='badge '+(state.mode==='demo'?'warning':'');
   $('demoScan').hidden=state.mode!=='demo';
+  const setup=state.mode==='demo'||!state.organizations.length;
+  $('setupHint').hidden=!setup;
+  $('setupHintText').textContent=state.mode==='demo'?'Сейчас включена демонстрация. Для реального товара переключитесь в рабочий режим.':'Добавьте ваши организации и параметры СУЗ, затем подключите ЧЗ по ЭЦП.';
   $('activeTab').classList.toggle('selected',!history); $('historyTab').classList.toggle('selected',history);
   $('listTitle').textContent=history?'История разделений':'Ожидают завершения';
   $('counts').textContent=state.operations.length+' операций · показаны последние 500';
@@ -53,7 +63,7 @@ async function reload() {
     const row=el('div',undefined,'row');
     if(op.new_code) { const a=el('a','Скачать PDF','button secondary'); a.href='/api/operations/'+op.id+'/label.pdf'; row.append(a); }
     if(op.state==='awaiting_signature') { const job=state.jobs.find(j=>j.target===op.id&&j.kind==='order'&&j.state==='prepared'); if(job) row.append(button('Подписать',()=>openSign(job.id),'primary')); }
-    if(op.state==='order_pending') row.append(button('Получить КМ',async()=>{await api('/api/operations/'+op.id+'/poll',{}); await reload();}));
+    if(op.state==='order_pending') row.append(button('Получить КМ',async()=>{const result=await api('/api/operations/'+op.id+'/poll',{});await reload();notice(result.state==='ready'?'Новый КМ получен. Скачайте PDF, распечатайте и нанесите этикетку.':(result.error||'СУЗ ещё готовит КМ. Повторите проверку готовности позже.'),Boolean(result.error));}));
     actions.append(row); tr.append(choose,pn,qty,status,actions); $('operations').append(tr);
   }
   updateSelected();
@@ -75,7 +85,7 @@ async function reload() {
     const row=el('div',undefined,'row');
     for(const kind of ['true','oms']) {
       const token=org.tokens.find(t=>t.kind===kind);
-      const text=(kind==='true'?'ГИС МТ':'СУЗ')+(token?' · обновлён '+new Date(token.updated).toLocaleTimeString('ru-RU'):' · нет доступа');
+      const text=(kind==='true'?'Подключить ГИС МТ':'Подключить СУЗ')+(token?' · обновлён '+new Date(token.updated).toLocaleTimeString('ru-RU'):'');
       row.append(button(text,async()=>{const job=await api('/api/auth/'+org.inn+'/'+kind,{}); await reload(); await openSign(job.id);}));
     }
     card.append(row); $('orgs').append(card);
@@ -88,6 +98,7 @@ async function doScan(raw) {
   $('splitPN').textContent=scanned.pn; $('splitOrg').textContent=scanned.organization;
   $('originalQuantity').textContent=scanned.quantity; $('reservedQuantity').textContent=scanned.reserved; $('availableQuantity').textContent=scanned.available;
   $('quantity').max=scanned.max_quantity; $('quantity').value=''; $('remain').textContent='Максимум '+scanned.max_quantity+' шт.';
+  $('splitError').hidden=true;
   $('createSplit').disabled=scanned.max_quantity<1;
   $('splitDialog').showModal(); $('quantity').focus();
 }
@@ -96,17 +107,68 @@ $('demoScan').onclick=()=>action(()=>doScan(state.demo_code));
 $('quantity').oninput=()=>{const q=Number($('quantity').value); $('remain').textContent='После разделения останется: '+(scanned.available-q)+' шт.';};
 $('closeSplit').onclick=()=>{$('splitDialog').close(); $('scan').focus();};
 $('splitForm').onsubmit=e=>{e.preventDefault(); action(async()=>{
+  $('splitError').hidden=true;
   const quantity=Number($('quantity').value);
   const fingerprint=JSON.stringify([scanned.full,quantity]);
   let draft; try {draft=JSON.parse(sessionStorage.getItem('splitDraft'));} catch {}
-  if(!draft||draft.fingerprint!==fingerprint) draft={fingerprint,request_id:crypto.randomUUID()};
-  sessionStorage.setItem('splitDraft',JSON.stringify(draft));
+  // randomUUID is secure-context-only: HTTP on a LAN IP does not expose it.
+  // Allocate the idempotency key on the server; no crypto API/polyfill required.
+  if(!draft||draft.fingerprint!==fingerprint) draft={fingerprint,...await api('/api/request-id',{})};
+  try {sessionStorage.setItem('splitDraft',JSON.stringify(draft));} catch {throw new Error('Браузер запретил сохранение запроса. Разрешите данные сайта для повторной отправки без дублей.');}
   $('createSplit').disabled=true;
   try {
     const op=await api('/api/operations',{code:scanned.full,quantity,request_id:draft.request_id});
     sessionStorage.removeItem('splitDraft'); $('splitDialog').close(); $('scan').value=''; await reload();
     const job=state.jobs.find(j=>j.target===op.id&&j.kind==='order'&&j.state==='prepared'); if(job) await openSign(job.id);
   } finally {$('createSplit').disabled=false;}
+});};
+
+function editorRow(org={}) {
+  const row=el('fieldset',undefined,'organizationEdit');
+  row.append(el('legend','Организация'));
+  const defaults={true_api_url:'https://markirovka.crpt.ru',oms_url:'https://suzgrid.crpt.ru',template_id:36};
+  const fields=[['name','Наименование'],['inn','ИНН'],['oms_id','OMS ID — идентификатор СУЗ'],['oms_connection','OMS Connection — идентификатор подключения']];
+  const appendField=(key,label,parent=row)=>{
+    const id='org-'+key+'-'+document.querySelectorAll('.organizationEdit').length+'-'+row.querySelectorAll('input').length;
+    const input=el('input');input.id=id;input.dataset.field=key;input.value=org[key]??defaults[key]??'';
+    input.autocomplete='off';input.spellcheck=false;
+    const title=el('label',label);title.htmlFor=id;parent.append(title,input);return input;
+  };
+  for(const [key,label] of fields) appendField(key,label);
+  const label=el('label','Шаблон нового КМ'),select=el('select');select.dataset.field='template_id';
+  for(const [id,title] of [[36,'36 · длинный криптохвост 91/92'],[37,'37 · короткий криптохвост 93']]) {const option=el('option',title);option.value=id;select.append(option);}
+  select.value=org.template_id??36;label.append(select);row.append(label);
+  const advanced=el('details'),summary=el('summary','Адреса API и владелец карточки (при необходимости)');advanced.append(summary);
+  appendField('true_api_url','Базовый адрес True API',advanced);appendField('oms_url','Базовый адрес СУЗ',advanced);appendField('producer_inn','ИНН владельца карточки (необязательно)',advanced);row.append(advanced);
+  const remove=el('button','Убрать организацию','quiet');remove.type='button';remove.onclick=()=>row.remove();row.append(remove);
+  $('organizationEditor').append(row);
+}
+async function openConfiguration() {
+  configuration=await api('/api/settings');
+  $('workMode').value=configuration.mode;
+  $('organizationEditor').replaceChildren();
+  for(const org of configuration.organizations) editorRow(org);
+  if(!configuration.organizations.length) editorRow();
+  $('bridgeStatus').textContent=configuration.crypto_bridge_installed?'Скрипт КриптоПро установлен на VPS.':'Для подписи в браузере установите мост КриптоПро на VPS: bash /opt/km-split/scripts/install-crypto-bridge.sh';
+  $('configurationError').hidden=true;$('configurationDialog').showModal();
+}
+$('configurationToggle').onclick=()=>action(openConfiguration);$('setupOpen').onclick=()=>action(openConfiguration);
+$('closeConfiguration').onclick=()=>{$('configurationDialog').close();$('scan').focus();};
+$('addOrganization').onclick=()=>editorRow();
+$('configurationForm').onsubmit=e=>{e.preventDefault();action(async()=>{
+  $('configurationError').hidden=true;
+  const organizations=[];
+  for(const row of document.querySelectorAll('.organizationEdit')) {
+    const org={};for(const input of row.querySelectorAll('[data-field]'))org[input.dataset.field]=input.value.trim();
+    if(!org.name&&!org.inn&&!org.oms_id&&!org.oms_connection)continue;
+    org.template_id=Number(org.template_id);if(!org.producer_inn)delete org.producer_inn;organizations.push(org);
+  }
+  const mode=$('workMode').value;
+  if(mode==='live'&&configuration.mode!=='live'&&!confirm('Включить рабочий режим? Заказы и отчёты после подписи будут отправляться в настоящий ЧЗ.'))return;
+  configuration=await api('/api/settings',{mode,organizations,revision:configuration.revision});
+  $('configurationDialog').close();scanned=null;currentJob=null;history=false;sessionStorage.removeItem('splitDraft');
+  $('scan').value='';await reload();$('access').hidden=false;
+  notice(mode==='live'?'Рабочий режим включён. Подключите ГИС МТ и СУЗ вашей организации по ЭЦП.':'Демонстрационный режим включён. Рабочие данные сохранены отдельно.');
 });};
 $('prepareReport').onclick=()=>action(async()=>{
   const ids=Array.from(document.querySelectorAll('#operations input:checked'),e=>e.value);
@@ -139,7 +201,9 @@ async function loadCrypto() {
     const script=document.createElement('script'); script.src='/static/vendor/cadesplugin_api.js';
     const timer=setTimeout(()=>reject(new Error('Плагин подписи не ответил. Используйте подпись через файл.')),22000);
     script.onerror=()=>{clearTimeout(timer);reject(new Error('Скрипт КриптоПро не установлен на сервере. Используйте подпись через файл.'));};
-    script.onload=async()=>{try{await window.cadesplugin;clearTimeout(timer);resolve(window.cadesplugin);}catch{clearTimeout(timer);reject(new Error('Установите КриптоПро ЭЦП Browser plug-in и расширение браузера'));}};
+    // cadesplugin is itself a Promise decorated with API methods. Resolving a
+    // Promise with it unwraps to undefined and loses CreateObjectAsync.
+    script.onload=async()=>{try{await window.cadesplugin;clearTimeout(timer);resolve();}catch{clearTimeout(timer);reject(new Error('Установите КриптоПро ЭЦП Browser plug-in и расширение браузера'));}};
     document.head.append(script);
   }).catch(e=>{cryptoReady=null;throw e;});
   return cryptoReady;
@@ -147,7 +211,7 @@ async function loadCrypto() {
 $('loadCertificates').onclick=()=>action(async()=>{
   try {
     $('cryptoStatus').textContent='Подключение к КриптоПро…';
-    const cp=await loadCrypto(), store=await cp.CreateObjectAsync('CAdESCOM.Store');
+    await loadCrypto();const cp=window.cadesplugin, store=await cp.CreateObjectAsync('CAdESCOM.Store');
     await store.Open(2,'My',2);
     try {
       const certificates=await store.Certificates, count=await certificates.Count;
@@ -160,7 +224,7 @@ $('loadCertificates').onclick=()=>action(async()=>{
 async function signWithPlugin(job) {
   const thumb=$('certificate').value;
   if(!thumb) throw new Error('Выберите сертификат или загрузите подпись из файла');
-  const cp=await loadCrypto(), store=await cp.CreateObjectAsync('CAdESCOM.Store'); await store.Open(2,'My',2);
+  await loadCrypto();const cp=window.cadesplugin, store=await cp.CreateObjectAsync('CAdESCOM.Store'); await store.Open(2,'My',2);
   try {
     const all=await store.Certificates, found=await all.Find(0,thumb);
     if(!(await found.Count)) throw new Error('Сертификат недоступен. Подключите ЭЦП к этому ПК');
@@ -179,7 +243,9 @@ $('signAndSubmit').onclick=()=>action(async()=>{
     const job=await api('/api/jobs/'+currentJob.id+'/submit',{signature});
     if(['rejected','unknown','sending'].includes(job.state)) {throw new Error(job.error||'Результат неизвестен. Проверьте список заданий; повторная отправка заблокирована.');}
     $('signDialog').close(); notice(job.kind==='order'?'Заказ принят. Нажмите «Получить КМ», когда код будет готов.':job.kind==='report'?'Отчёт отправлен. Нажмите «Проверить результат».':'Доступ обновлён.');
-    await reload(); $('scan').focus();
+    await reload();
+    if(job.kind.startsWith('auth_')&&state.organizations.some(org=>org.inn===job.inn&&['true','oms'].every(kind=>org.tokens.some(token=>token.kind===kind))))$('access').hidden=true;
+    $('scan').focus();
   } catch(e) {$('signError').textContent=e.message||String(e); $('signError').hidden=false; await reload();}
   finally {$('signAndSubmit').disabled=false;}
 });

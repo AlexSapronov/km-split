@@ -1,10 +1,12 @@
-import base64
-import binascii
-import secrets
+import asyncio
+import json
+import os
+import tempfile
 from pathlib import Path
-from uuid import UUID
+from uuid import UUID, uuid4
+from typing import Literal
 from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, ConfigDict, StrictInt
 from km_split.config import Settings
@@ -41,6 +43,23 @@ class Recover(Body):
     remote_id: UUID
 
 
+class Organization(Body):
+    inn: str = Field(min_length=10, max_length=12)
+    name: str = Field(min_length=1, max_length=120)
+    oms_id: str
+    oms_connection: str
+    true_api_url: str = 'https://markirovka.crpt.ru'
+    oms_url: str = 'https://suzgrid.crpt.ru'
+    template_id: Literal[36, 37] = 36
+    producer_inn: str | None = Field(default=None, max_length=12)
+
+
+class Configuration(Body):
+    mode: Literal['live', 'demo']
+    organizations: list[Organization] = Field(max_length=30)
+    revision: str = Field(min_length=64, max_length=64)
+
+
 def create_app(settings=None, gateway_factory=Gateway):
     settings = settings or Settings.load()
     settings.data.mkdir(exist_ok=True, parents=True, mode=0o700)
@@ -52,29 +71,28 @@ def create_app(settings=None, gateway_factory=Gateway):
     service = Service(settings, store, gateway_factory(settings, store))
     app = FastAPI(title='Разделение КМ', docs_url=None, redoc_url=None, openapi_url=None)
     app.state.service = service
+    write_lock = asyncio.Lock()
 
     @app.middleware('http')
     async def protect(request: Request, call_next):
         if request.url.path == '/health':
             return JSONResponse({'status': 'ok'})
-        authorized = False
-        try:
-            scheme, encoded = request.headers.get('authorization', '').split(' ', 1)
-            user, password = base64.b64decode(encoded, validate=True).decode().split(':', 1)
-            authorized = scheme.lower() == 'basic' and secrets.compare_digest(user.encode(), settings.user.encode()) and secrets.compare_digest(password.encode(), settings.password.encode())
-        except (ValueError, binascii.Error, UnicodeDecodeError):
-            pass
-        if not authorized:
-            return Response(status_code=401, headers={'WWW-Authenticate': 'Basic realm="KM Split", charset="UTF-8"'})
         if request.method not in ('GET', 'HEAD', 'OPTIONS'):
             if request.headers.get('X-Requested-With') != 'km-split':
                 return JSONResponse({'detail': 'Обновите страницу приложения'}, status_code=403)
             origin = request.headers.get('origin')
             if origin and origin != str(request.base_url).rstrip('/'):
                 return JSONResponse({'detail': 'Недопустимый источник запроса'}, status_code=403)
-            if int(request.headers.get('content-length', '0')) > 200000:
+            length = request.headers.get('content-length', '0')
+            if not length.isdigit() or int(length) > 200000:
                 return JSONResponse({'detail': 'Слишком большой запрос'}, status_code=413)
-        response = await call_next(request)
+            # Configuration cannot change while a signed external request is in flight.
+            async with write_lock:
+                if request.url.path != '/api/settings' and request.headers.get('X-Split-Mode', settings.mode) != settings.mode:
+                    return JSONResponse({'detail': 'Режим работы изменился в другой вкладке. Обновите страницу перед продолжением'}, status_code=409)
+                response = await call_next(request)
+        else:
+            response = await call_next(request)
         response.headers['Cache-Control'] = 'no-store'
         response.headers['X-Content-Type-Options'] = 'nosniff'
         response.headers['X-Frame-Options'] = 'DENY'
@@ -96,6 +114,62 @@ def create_app(settings=None, gateway_factory=Gateway):
     @app.get('/api/state')
     async def state(history: bool = False):
         return service.state(history)
+
+    @app.post('/api/request-id')
+    async def request_id():
+        return {'request_id': str(uuid4())}
+
+    @app.get('/api/settings')
+    async def configuration():
+        bridge = ROOT / 'static/vendor/cadesplugin_api.js'
+        return {**settings.configuration(), 'crypto_bridge_installed': bridge.exists()}
+
+    @app.post('/api/settings')
+    async def save_configuration(body: Configuration):
+        nonlocal settings, service
+        current = settings.configuration()
+        if body.revision != current['revision']:
+            raise ValueError('Настройки изменились в другой вкладке. Загрузите актуальные настройки')
+        organizations = [o.model_dump(exclude_none=True) for o in body.organizations]
+        Settings.validate_organizations(organizations)
+        if body.mode == 'live' and not organizations:
+            raise ValueError('Добавьте хотя бы одну организацию для рабочего режима')
+        # Do not strand paid codes or route old signatures through changed settings.
+        if body.mode == settings.mode and organizations == current['organizations']:
+            return await configuration()
+        if settings.mode == 'live' and service.store.one("SELECT id FROM operations WHERE state NOT IN ('done','cancelled') LIMIT 1"):
+            raise ValueError('Есть незавершённые рабочие разделения. Завершите или разберите их перед сменой настроек')
+        if settings.mode == 'live' and service.store.one("SELECT id FROM jobs WHERE state='sending' LIMIT 1"):
+            raise ValueError('Дождитесь завершения отправки в ЧЗ')
+        root = settings.root or settings.data
+        config = root / 'configuration.json'
+        old_bytes = config.read_bytes() if config.exists() else None
+        payload = json.dumps({'mode': body.mode, 'organizations': organizations}, ensure_ascii=False, indent=2)
+        fd, temporary = tempfile.mkstemp(prefix='configuration-', suffix='.tmp', dir=root)
+        try:
+            with os.fdopen(fd, 'w', encoding='utf-8') as stream:
+                stream.write(payload); stream.flush(); os.fsync(stream.fileno())
+            os.replace(temporary, config)
+            try:
+                updated = Settings.from_root(root)
+                updated_store = Store(updated.data / 'split.sqlite3')
+                # Expire tokens if endpoint/connection/permissions settings changed.
+                old_orgs = {o['inn']: o for o in current['organizations']}
+                with updated_store.transaction() as db:
+                    for org in organizations:
+                        if old_orgs.get(org['inn']) != org:
+                            db.execute('DELETE FROM tokens WHERE inn=?', (org['inn'],))
+                    db.execute("UPDATE jobs SET state='cancelled',updated=datetime('now') WHERE kind LIKE 'auth_%' AND state='prepared'")
+                updated_service = Service(updated, updated_store, gateway_factory(updated, updated_store))
+            except Exception:
+                if old_bytes is None: config.unlink(missing_ok=True)
+                else: config.write_bytes(old_bytes)
+                raise
+            settings, service = updated, updated_service
+            app.state.service = service
+        finally:
+            Path(temporary).unlink(missing_ok=True)
+        return await configuration()
 
     @app.post('/api/scan')
     async def scan(body: Scan):

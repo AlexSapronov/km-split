@@ -238,13 +238,12 @@ def test_pdf_round_trip(tmp_path, raw):
     assert decoded.bytes == full.encode('ascii')
 
 
-def test_auth_csrf_and_secrets(settings):
+def test_no_login_csrf_and_secrets(settings):
     app = create_app(settings)
     with TestClient(app) as client:
         assert client.get('/health').status_code == 200
-        assert client.get('/').status_code == 401
-        client.auth = (settings.user, settings.password)
         assert client.get('/').status_code == 200
+        assert 'www-authenticate' not in client.get('/').headers
         assert client.post('/api/scan', json={'code':CODE}).status_code == 403
         client.headers['X-Requested-With'] = 'km-split'
         assert client.post('/api/scan', json={'code':CODE}, headers={'Origin':'https://evil.invalid'}).status_code == 403

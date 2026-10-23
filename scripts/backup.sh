@@ -22,5 +22,7 @@ with tempfile.TemporaryDirectory() as temp:
         for relative in ['organizations.json', 'mode', 'labels', 'receipts']:
             path = settings.data / relative
             if path.exists(): archive.add(path, arcname=relative)
+        configuration = (settings.root or settings.data) / 'configuration.json'
+        if configuration.exists(): archive.add(configuration, arcname='configuration.json')
 print(destination)
 PY

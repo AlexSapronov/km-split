@@ -41,6 +41,8 @@ class Service:
         return expected - sums['pending']
 
     async def scan(self, raw):
+        if self.settings.mode == 'live' and not self.settings.organizations:
+            raise ValueError('Сначала добавьте вашу организацию в «Настройки» и подключите ЧЗ по ЭЦП')
         info = await self.gateway.info(raw)
         with self.store.transaction() as db:
             available = self._available(db, info)
@@ -75,6 +77,8 @@ class Service:
         if type(quantity) is not int or quantity < 1:
             raise ValueError('Введите положительное целое количество')
         code = parse(raw)
+        if self.settings.mode == 'live' and code.gtin.startswith('029'):
+            raise ValueError('Эмиссия REAPPLY недоступна для технического GTIN диапазона 029')
         fingerprint = hashlib.sha256(canonical([code.full, quantity]).encode()).hexdigest()
         existing = self.store.one('SELECT id,fingerprint FROM operations WHERE request_id=?', (request_id,))
         if existing:
