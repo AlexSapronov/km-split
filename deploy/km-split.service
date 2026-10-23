@@ -1,0 +1,24 @@
+[Unit]
+Description=Standalone warehouse KM division MVP
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=kmsplit
+Group=kmsplit
+WorkingDirectory=/opt/km-split
+EnvironmentFile=/opt/km-split/.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/km-split/.venv/bin/python -m uvicorn main:create_app --factory --host 127.0.0.1 --port 8010 --workers 1 --proxy-headers --forwarded-allow-ips=127.0.0.1
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/km-split/data
+
+[Install]
+WantedBy=multi-user.target

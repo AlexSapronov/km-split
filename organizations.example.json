@@ -1,0 +1,11 @@
+[
+  {
+    "inn": "7700000000",
+    "name": "Тестовая организация (замените)",
+    "oms_id": "00000000-0000-0000-0000-000000000000",
+    "oms_connection": "00000000-0000-0000-0000-000000000000",
+    "true_api_url": "https://markirovka.crpt.ru",
+    "oms_url": "https://suzgrid.crpt.ru",
+    "template_id": 36
+  }
+]
