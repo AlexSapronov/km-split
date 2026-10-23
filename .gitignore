@@ -1,0 +1,10 @@
+.env
+.venv/
+data/
+__pycache__/
+.pytest_cache/
+*.pyc
+*.sig
+*.p7s
+static/vendor/
+test-results/
