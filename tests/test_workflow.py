@@ -77,6 +77,18 @@ def test_invalid_quantity(quantity):
     with pytest.raises(ValueError): with_quantity(CODE, quantity)
 
 
+@pytest.mark.parametrize('raw', [CODE, LONG_CODE])
+@pytest.mark.parametrize('quantity', [1, 50, 99999999])
+def test_rescan_issued_quantity_without_gs(raw, quantity):
+    full = with_quantity(raw, quantity)
+    scanned = parse(full.replace(GS, ''))
+    assert scanned.full == full
+    assert scanned.quantity == quantity
+    assert scanned.cis == parse(raw).cis
+    new = with_quantity(raw[:18] + '5SECOND0000000000000' + raw[38:], 1)
+    assert division_entry(new, scanned.full) == new + RS + full
+
+
 def test_report_entry():
     new = with_quantity(LONG_CODE, 30)
     entry = division_entry(new, CODE)

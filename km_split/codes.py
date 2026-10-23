@@ -60,6 +60,10 @@ def parse(raw: str) -> Code:
         raise ValueError('Нужен полный КМ с криптохвостом 91/92 или 93')
     quantity = None
     if remainder:
+        # Keyboard-wedge scanners can omit GS bytes. Crypto lengths above are
+        # fixed, so AI 30 starts at an unambiguous boundary after the crypto.
+        if remainder.startswith('30'):
+            remainder = GS + remainder
         match = re.fullmatch(GS + r'30([0-9]{1,8})', remainder)
         if not match or not 1 <= int(match[1]) <= 99999999:
             raise ValueError('Поддерживается только переменная характеристика количества AI 30 (шт.)')
