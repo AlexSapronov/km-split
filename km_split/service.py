@@ -5,7 +5,7 @@ from uuid import uuid4
 from .codes import parse, with_quantity, division_entry
 from .db import now
 from .clients import RemoteError
-from .labels import render_label
+from .labels import render_label, display_pn
 
 
 def canonical(value):
@@ -20,7 +20,7 @@ class Service:
         op = self.store.one('SELECT o.*,s.gtin,s.full source_code FROM operations o JOIN sources s ON s.cis=o.source WHERE o.id=?', (operation_id,))
         if not op:
             raise ValueError('Операция не найдена')
-        return op
+        return {**op, 'pn': display_pn(op['pn'])}
 
     def job(self, job_id):
         job = self.store.one('SELECT * FROM jobs WHERE id=?', (job_id,))
@@ -46,7 +46,7 @@ class Service:
         info = await self.gateway.info(raw)
         with self.store.transaction() as db:
             available = self._available(db, info)
-        return {**info, 'available': available, 'reserved': info['quantity'] - available,
+        return {**info, 'pn': display_pn(info['pn']), 'available': available, 'reserved': info['quantity'] - available,
                 'max_quantity': max(0, available - 1),
                 'organization': self.gateway.org(info['inn'])['name']}
 
@@ -288,7 +288,7 @@ class Service:
             raise ValueError('Новый КМ ещё не получен')
         labels = self.settings.data / 'labels'
         labels.mkdir(mode=0o700, exist_ok=True)
-        path = labels / (op_id + '-v2.pdf')
+        path = labels / (op_id + '-v3.pdf')
         if not path.exists():
             payload = render_label(op['new_code'], op['pn'], op['quantity'], self.settings.mode == 'demo')
             temporary = path.with_suffix('.tmp-' + uuid4().hex)
@@ -351,6 +351,7 @@ class Service:
             organizations.append({'inn': org['inn'], 'name': org['name'], 'tokens': tokens})
         condition = "o.state IN ('done','cancelled')" if history else "o.state NOT IN ('done','cancelled')"
         operations = self.store.all('SELECT o.*,s.gtin FROM operations o JOIN sources s ON s.cis=o.source WHERE ' + condition + ' ORDER BY o.created DESC LIMIT 500')
+        operations = [{**op, 'pn': display_pn(op['pn'])} for op in operations]
         jobs = self.store.all("SELECT id,kind,inn,target,state,remote_id,error,created FROM jobs WHERE state NOT IN ('done','cancelled') ORDER BY created DESC LIMIT 500")
         return {'mode': self.settings.mode, 'file_signing_enabled': self.settings.file_signing_enabled,
                 'organizations': organizations, 'operations': operations, 'jobs': jobs,

@@ -103,6 +103,7 @@ def main():
                 expect(page.locator('#signDialog')).not_to_be_visible()
                 page.get_by_role('button',name='Получить КМ',exact=True).click()
                 expect(page.locator('#operations')).to_contain_text('Ожидает нанесения и отчёта')
+                expect(page.locator('#operations')).not_to_contain_text('Артикул')
                 screenshots=os.getenv('SPLIT_SCREENSHOTS')
                 if screenshots:
                     folder=Path(screenshots);folder.mkdir(parents=True,exist_ok=True)

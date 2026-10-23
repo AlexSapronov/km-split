@@ -37,6 +37,11 @@ class GS1Matrix(ECC200DataMatrix):
         return data
 
 
+def display_pn(pn: str) -> str:
+    """Omit the catalog characteristic type from the displayed model value."""
+    return re.sub(r'^\s*(?:Артикул|Модель)(?:\s*:\s*|\s+)(?=\S)', '', pn, count=1, flags=re.IGNORECASE).strip()
+
+
 def render_label(full_code: str, pn: str, quantity: int, demo=False) -> bytes:
     code = parse(full_code)
     barcode = GS1Matrix(full_code)
@@ -68,7 +73,7 @@ def render_label(full_code: str, pn: str, quantity: int, demo=False) -> bytes:
     if logo.exists():
         c.drawImage(str(logo), text_x, 30 * mm, width=25 * mm, height=8.53 * mm, mask='auto')
     # Wrap long PN without clipping or shrinking it beyond legibility.
-    pn = re.sub(r'^\s*Артикул(?:\s*:\s*|\s+)(?=\S)', '', pn, count=1, flags=re.IGNORECASE)
+    pn = display_pn(pn)
     chunks, chunk = [], ''
     for char in pn:
         if pdfmetrics.stringWidth(chunk + char, font, 9) > width:

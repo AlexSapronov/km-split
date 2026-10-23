@@ -42,7 +42,7 @@ class LiveFixture:
                 'ownerInn':self.inn,'status':'INTRODUCED','quantityInPack':self.quantity}}])
         if path.endswith('/product/info'):
             assert json.loads(request.content)=={'gtins':[parse(SOURCE).gtin]}
-            return httpx.Response(200,json={'results':[{'gtin':parse(SOURCE).gtin,'model':'PILOT-PN-100'}]})
+            return httpx.Response(200,json={'results':[{'gtin':parse(SOURCE).gtin,'model':'Артикул PILOT-PN-100'}]})
         assert request.headers['clientToken']=='fixture-oms-token'
         assert request.url.params.get('omsId')
         if path=='/api/v3/order':
