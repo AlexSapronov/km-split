@@ -26,7 +26,9 @@ class GS1Matrix(ECC200DataMatrix):
                 char = value[pos]
                 if ord(char) > 127:
                     raise ValueError('КМ должен содержать только ASCII')
-                data.append(232 if char == '\x1d' else ord(char) + 1); pos += 1
+                # FNC1 (232) is only the GS1 symbol start. A literal GS
+                # separator (ASCII 29) uses the regular ASCII codeword 30.
+                data.append(ord(char) + 1); pos += 1
         if len(data) > self.cw_data:
             raise ValueError('КМ слишком длинный для макета этикетки')
         if len(data) < self.cw_data:
@@ -44,7 +46,7 @@ def display_pn(pn: str) -> str:
 
 def render_label(full_code: str, pn: str, quantity: int, demo=False) -> bytes:
     code = parse(full_code)
-    barcode = GS1Matrix(full_code)
+    barcode = GS1Matrix(code.full)
     barcode.validate()
     matrix = barcode.encode()  # Bottom-up, as expected by PDF coordinates.
     w, h = len(matrix[0]), len(matrix)
