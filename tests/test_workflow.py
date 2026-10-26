@@ -336,3 +336,17 @@ async def test_mutating_http_timeout_is_unknown(settings):
     with pytest.raises(RemoteError) as exc:
         await gateway.request('POST','https://example.invalid',mutating=True)
     assert exc.value.uncertain
+
+
+async def test_legacy_cached_pdf_is_regenerated_with_gs_separators(svc):
+    op = await issue(svc)
+    old_pdf = svc.settings.data / 'labels' / (op['id'] + '-v3.pdf')
+    old_pdf.parent.mkdir(parents=True, exist_ok=True)
+    old_pdf.write_bytes(b'legacy FNC1-encoded label')
+
+    updated_pdf = svc.label(op['id'])
+    assert updated_pdf.name == op['id'] + '-v4.pdf'
+    assert updated_pdf != old_pdf
+    assert updated_pdf.read_bytes().startswith(b'%PDF-')
+    assert old_pdf.read_bytes() == b'legacy FNC1-encoded label'
+    assert svc.label(op['id']) == updated_pdf

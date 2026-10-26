@@ -288,7 +288,9 @@ class Service:
             raise ValueError('Новый КМ ещё не получен')
         labels = self.settings.data / 'labels'
         labels.mkdir(mode=0o700, exist_ok=True)
-        path = labels / (op_id + '-v3.pdf')
+        # Bump the PDF cache version when barcode encodation changes: never
+        # return a previously generated v3 label with FNC1 separators.
+        path = labels / (op_id + '-v4.pdf')
         if not path.exists():
             payload = render_label(op['new_code'], op['pn'], op['quantity'], self.settings.mode == 'demo')
             temporary = path.with_suffix('.tmp-' + uuid4().hex)
