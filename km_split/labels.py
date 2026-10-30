@@ -40,8 +40,17 @@ class GS1Matrix(ECC200DataMatrix):
 
 
 def display_pn(pn: str) -> str:
-    """Omit the catalog characteristic type from the displayed model value."""
-    return re.sub(r'^\s*(?:Артикул|Модель)(?:\s*:\s*|\s+)(?=\S)', '', pn, count=1, flags=re.IGNORECASE).strip()
+    """Strip a leading catalog field name without changing the actual part number."""
+    # Match the compound field first: otherwise "Модель / Артикул PN"
+    # becomes "/ Артикул PN" after stripping only "Модель".
+    return re.sub(
+        r'^\s*(?:(?:Артикул|Модель)\s*/\s*(?:Артикул|Модель)|Артикул|Модель)'
+        r'(?:\s*:\s*|\s+)(?=\S)',
+        '',
+        pn,
+        count=1,
+        flags=re.IGNORECASE,
+    ).strip()
 
 
 def render_label(full_code: str, pn: str, quantity: int, demo=False) -> bytes:
