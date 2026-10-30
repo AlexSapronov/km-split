@@ -338,15 +338,20 @@ async def test_mutating_http_timeout_is_unknown(settings):
     assert exc.value.uncertain
 
 
-async def test_legacy_cached_pdf_is_regenerated_with_gs_separators(svc):
+async def test_legacy_cached_pdfs_are_regenerated(svc):
     op = await issue(svc)
-    old_pdf = svc.settings.data / 'labels' / (op['id'] + '-v3.pdf')
-    old_pdf.parent.mkdir(parents=True, exist_ok=True)
-    old_pdf.write_bytes(b'legacy FNC1-encoded label')
+    directory = svc.settings.data / 'labels'
+    directory.mkdir(parents=True, exist_ok=True)
+    old_pdfs = {}
+    for version in ('v3', 'v4'):
+        old_pdf = directory / (op['id'] + '-' + version + '.pdf')
+        old_pdf.write_bytes(b'legacy cached label ' + version.encode('ascii'))
+        old_pdfs[version] = old_pdf
 
     updated_pdf = svc.label(op['id'])
-    assert updated_pdf.name == op['id'] + '-v4.pdf'
-    assert updated_pdf != old_pdf
+    assert updated_pdf.name == op['id'] + '-v5.pdf'
     assert updated_pdf.read_bytes().startswith(b'%PDF-')
-    assert old_pdf.read_bytes() == b'legacy FNC1-encoded label'
+    for version, old_pdf in old_pdfs.items():
+        assert updated_pdf != old_pdf
+        assert old_pdf.read_bytes() == b'legacy cached label ' + version.encode('ascii')
     assert svc.label(op['id']) == updated_pdf
