@@ -95,19 +95,20 @@ def test_rescan_issued_quantity_without_gs(raw, quantity):
 def test_report_entry():
     new = with_quantity(LONG_CODE, 30)
     entry = division_entry(new, CODE)
-    assert new.endswith(GS + '30' + '00000030')
+    assert new.endswith(GS + '30' + '30')
     assert entry == new + RS + CODE
     with pytest.raises(ValueError): division_entry(with_quantity(CODE, 30), CODE)
 
 
-def test_division_entry_normalizes_new_ai30_and_strips_source_ai30():
+def test_division_entry_normalizes_padded_quantity_and_strips_source_ai30():
     new = with_quantity(LONG_CODE, 30)
-    # A pre-fix operation may already be stored with a short AI 30 value.
-    old_new = new.rsplit(GS + '30', 1)[0] + GS + '30' + '30'
+    # Reports accepted by CRPT before the regression use variable-length AI 30.
+    padded_new = new.rsplit(GS + '30', 1)[0] + GS + '30' + '00000030'
     old_source = with_quantity(CODE, 100)
-    entry = division_entry(old_new, old_source)
+    entry = division_entry(padded_new, old_source)
     new_part, source_part = entry.split(RS, 1)
-    assert new_part.endswith(GS + '30' + '00000030')
+    assert new_part.endswith(GS + '30' + '30')
+    assert parse(new_part).quantity == 30
     assert source_part == CODE
 
 
