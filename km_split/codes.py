@@ -79,21 +79,18 @@ def with_quantity(raw: str, quantity: int) -> str:
         raise ValueError('Количество должно быть целым числом от 1 до 99999999')
     if code.quantity is not None:
         raise ValueError('СУЗ вернула КМ с уже заполненным количеством')
-    return code.full + GS + '30' + f'{quantity:08d}'
+    return code.full + GS + '30' + str(quantity)
 
 
 def division_entry(new_code: str, source_code: str) -> str:
     new, source = parse(new_code), parse(source_code)
     if new.gtin != source.gtin or new.cis == source.cis or new.quantity is None:
         raise ValueError('Новый и исходный КМ не соответствуют операции разделения')
-    # AI 30 is an 8-digit quantity and belongs only to the newly issued code.
-    # Normalize existing ready operations too, since their stored value may predate this fix.
-    new_full = new.full
-    if new.quantity is not None:
-        new_base = new_full.rsplit(GS + '30', 1)[0]
-        new_full = new_base + GS + '30' + f'{new.quantity:08d}'
+    # Keep AI 30 in the format accepted by successful radio-electronics reports:
+    # variable-length decimal quantity, without zero-padding.
+    new_full = new.full.rsplit(GS + '30', 1)[0] + GS + '30' + str(new.quantity)
 
-    # The source code in DIVISIONMARK must be sent without AI 30.
+    # The source code in DIVISIONMARK is the original full code without AI 30.
     source_full = source.full
     if source.quantity is not None:
         source_full = source_full.rsplit(GS + '30', 1)[0]
