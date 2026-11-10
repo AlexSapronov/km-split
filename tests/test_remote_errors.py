@@ -53,7 +53,8 @@ def test_field_errors_are_extracted_from_nested_payloads():
     detail = error_detail({
         'fieldErrors': [
             {'field': 'sntins[0]', 'errorCode': '7360', 'errorMessage': 'Некорректный формат КМ'},
-            {'fieldName': 'attributes.participantId', 'message': 'ИНН участника не совпадает'}
+            {'fieldName': 'attributes.participantId', 'message': 'ИНН участника не совпадает'},
+            {'fieldName': 'sntins[2]', 'errorCode': '7846', 'fieldError': 'Текст ошибки ЧЗ'}
         ]
     })
     assert 'sntins[0]' in detail
@@ -61,6 +62,7 @@ def test_field_errors_are_extracted_from_nested_payloads():
     assert 'Некорректный формат КМ' in detail
     assert 'attributes.participantId' in detail
     assert 'ИНН участника не совпадает' in detail
+    assert 'sntins[2]: 7846: Текст ошибки ЧЗ' in detail
 
 
 def test_top_level_error_array_is_supported():

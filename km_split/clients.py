@@ -57,8 +57,8 @@ def error_detail(payload, sensitive=()):
         code = first_text(value, ('code', 'errorCode', 'error_code'))
         field = first_text(value, ('field', 'fieldName', 'field_name', 'property', 'propertyPath',
                                    'path', 'parameter', 'target')) or field_hint
-        message = first_text(value, ('error_message', 'errorMessage', 'message', 'description',
-                                      'detail', 'reason', 'title'))
+        message = first_text(value, ('fieldError', 'field_error', 'error_message', 'errorMessage', 'message',
+                                      'description', 'detail', 'reason', 'title'))
         if not message and isinstance(value.get('error'), str):
             message = value['error'].strip()
 
