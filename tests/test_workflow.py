@@ -86,14 +86,29 @@ def test_rescan_issued_quantity_without_gs(raw, quantity):
     assert scanned.quantity == quantity
     assert scanned.cis == parse(raw).cis
     new = with_quantity(raw[:18] + '5SECOND0000000000000' + raw[38:], 1)
-    assert division_entry(new, scanned.full) == new + RS + full
+    source_without_ai30 = scanned.full.rsplit(GS + '30', 1)[0]
+    entry = division_entry(new, scanned.full)
+    assert entry == new + RS + source_without_ai30
+    assert parse(entry.split(RS, 1)[0]).quantity == 1
 
 
 def test_report_entry():
     new = with_quantity(LONG_CODE, 30)
     entry = division_entry(new, CODE)
+    assert new.endswith(GS + '30' + '00000030')
     assert entry == new + RS + CODE
     with pytest.raises(ValueError): division_entry(with_quantity(CODE, 30), CODE)
+
+
+def test_division_entry_normalizes_new_ai30_and_strips_source_ai30():
+    new = with_quantity(LONG_CODE, 30)
+    # A pre-fix operation may already be stored with a short AI 30 value.
+    old_new = new.rsplit(GS + '30', 1)[0] + GS + '30' + '30'
+    old_source = with_quantity(CODE, 100)
+    entry = division_entry(old_new, old_source)
+    new_part, source_part = entry.split(RS, 1)
+    assert new_part.endswith(GS + '30' + '00000030')
+    assert source_part == CODE
 
 
 async def test_complete_cycle(svc):
