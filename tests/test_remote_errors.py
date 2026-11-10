@@ -1,7 +1,7 @@
 import json
 import httpx
 import pytest
-from km_split.clients import Gateway, RemoteError, error_detail
+from km_split.clients import Gateway, RemoteError, error_detail, request_secrets
 from km_split.config import Settings
 from km_split.db import Store
 
