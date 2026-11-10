@@ -12,37 +12,76 @@ class RemoteError(Exception):
         self.uncertain = uncertain
 
 
-def error_detail(payload, sensitive=()):
-    """Only documented diagnostic fields; never dump response or signed request."""
-    parts = []
-    def collect(value, depth=0):
-        if depth > 2 or not isinstance(value, dict):
-            return
-        for key in ('code', 'errorCode', 'error_code', 'error_message', 'errorMessage', 'message', 'description'):
-            item = value.get(key)
-            if isinstance(item, (str, int)) and not isinstance(item, bool) and str(item).strip():
-                text = str(item).strip()
-                if text not in parts:
-                    parts.append(text)
-        error = value.get('error')
-        if isinstance(error, str) and error.strip() and error not in parts:
-            parts.append(error.strip())
-        elif isinstance(error, dict):
-            collect(error, depth + 1)
-        if isinstance(value.get('errors'), list):
-            for item in value['errors'][:5]:
-                collect(item, depth + 1)
-    collect(payload)
-    text = '; '.join(parts)
+def redact_diagnostic(text, sensitive=()):
+    """Redact request material before any remote diagnostic reaches the UI."""
     for secret in sorted((s for s in sensitive if isinstance(s, str) and len(s) >= 8), key=len, reverse=True):
         text = text.replace(secret, '[скрыто]')
         text = text.replace(''.join(secret.split()), '[скрыто]')
         text = text.replace(json.dumps(secret)[1:-1], '[скрыто]')
-    # Catch otherwise unknown CMS, certificates, JWTs, or tokens echoed in prose.
+    # Catch otherwise unknown CMS, certificates, JWTs, and long encoded values.
     text = re.sub(r'\beyJ[A-Za-z0-9_.=-]{30,}', '[скрыто]', text)
     text = re.sub(r'[A-Za-z0-9+/=_-]{80,}', '[скрыто]', text)
     text = ''.join(c if c >= ' ' else ' ' for c in text)
     return text[:1200]
+
+
+def error_detail(payload, sensitive=()):
+    """Extract whitelisted diagnostics from OMS/True API error payloads."""
+    parts = []
+
+    def add(value):
+        if isinstance(value, (str, int)) and not isinstance(value, bool):
+            value = str(value).strip()
+            if value and value not in parts:
+                parts.append(value)
+
+    def first_text(value, keys):
+        for key in keys:
+            item = value.get(key)
+            if isinstance(item, (str, int)) and not isinstance(item, bool) and str(item).strip():
+                return str(item).strip()
+        return ''
+
+    def collect(value, depth=0, field_hint=''):
+        if depth > 4:
+            return
+        if isinstance(value, list):
+            for item in value[:10]:
+                collect(item, depth + 1, field_hint)
+            return
+        if not isinstance(value, dict):
+            if field_hint:
+                add(f'{field_hint}: {value}')
+            return
+
+        code = first_text(value, ('code', 'errorCode', 'error_code'))
+        field = first_text(value, ('field', 'fieldName', 'field_name', 'property', 'propertyPath',
+                                   'path', 'parameter', 'target')) or field_hint
+        message = first_text(value, ('error_message', 'errorMessage', 'message', 'description',
+                                      'detail', 'reason', 'title'))
+        if not message and isinstance(value.get('error'), str):
+            message = value['error'].strip()
+
+        if field and (message or code):
+            detail = f'{code}: {message}' if code and message else (message or code)
+            add(f'{field}: {detail}')
+        else:
+            add(code)
+            add(message)
+
+        nested_keys = ('error', 'errors', 'fieldErrors', 'field_errors', 'details', 'violations',
+                       'validationErrors', 'validation_errors', 'causes')
+        field_map_keys = ('fieldErrors', 'field_errors', 'validationErrors', 'validation_errors', 'violations')
+        for key in nested_keys:
+            child = value.get(key)
+            if isinstance(child, dict) and key in field_map_keys:
+                for name, item in list(child.items())[:10]:
+                    collect(item, depth + 1, str(name))
+            elif isinstance(child, (dict, list)):
+                collect(child, depth + 1)
+
+    collect(payload)
+    return redact_diagnostic('; '.join(parts), sensitive)
 
 
 def request_secrets(body, headers):
@@ -50,13 +89,63 @@ def request_secrets(body, headers):
     for key, value in (headers or {}).items():
         if key.lower() in ('authorization', 'clienttoken', 'x-signature'):
             sensitive.extend([value, value.removeprefix('Bearer ').removeprefix('token ')])
+
+    secret_keys = {'uuid', 'data', 'signature', 'token', 'uuidtoken', 'sntins', 'cis', 'cises', 'codes'}
+
+    def add_secret(value, depth=0):
+        if depth > 5:
+            return
+        if isinstance(value, str):
+            if len(value) >= 8:
+                sensitive.append(value)
+        elif isinstance(value, list):
+            for item in value[:1000]:
+                add_secret(item, depth + 1)
+        elif isinstance(value, dict):
+            for item in value.values():
+                add_secret(item, depth + 1)
+
+    def walk(value, depth=0):
+        if depth > 5:
+            return
+        if isinstance(value, dict):
+            for key, item in value.items():
+                if key.lower() in secret_keys:
+                    add_secret(item)
+                else:
+                    walk(item, depth + 1)
+        elif isinstance(value, list):
+            for item in value[:1000]:
+                walk(item, depth + 1)
+
     try:
         data = json.loads(body) if body else {}
-        if isinstance(data, dict):
-            sensitive.extend(data.get(key) for key in ('uuid', 'data', 'signature', 'token', 'uuidToken'))
+        walk(data)
     except (ValueError, TypeError):
         pass
     return sensitive
+
+
+def response_diagnostic(response, payload, sensitive=(), parsed=True):
+    """Explain the shape of an unrecognized error response without dumping it."""
+    detail = error_detail(payload, sensitive) if parsed else ''
+    if detail:
+        return detail
+
+    content_type = response.headers.get('content-type', '').split(';', 1)[0].strip().lower() or 'не указан'
+    if parsed and isinstance(payload, dict):
+        keys = ', '.join(str(key) for key in list(payload)[:12]) or 'нет'
+        return f'ЧЗ вернул JSON без распознанных диагностических полей (ключи: {keys}; Content-Type: {content_type}).'
+    if parsed and isinstance(payload, list):
+        return f'ЧЗ вернул JSON-массив без распознанных диагностических полей (элементов: {len(payload)}; Content-Type: {content_type}).'
+    if parsed:
+        return f'ЧЗ вернул JSON без распознанного описания (тип: {type(payload).__name__}; Content-Type: {content_type}).'
+
+    excerpt = ''
+    if content_type == 'text/plain':
+        excerpt = redact_diagnostic(response.text.strip(), sensitive)
+    suffix = f' Ответ: {excerpt}.' if excerpt else ''
+    return f'ЧЗ вернул нераспознанный ответ (Content-Type: {content_type}; размер: {len(response.content)} байт).{suffix}'
 
 
 class Gateway:
@@ -84,12 +173,14 @@ class Gateway:
             raise RemoteError('Нет подтверждения от ЧЗ. Проверьте состояние операции перед повтором.' if mutating
                               else 'ЧЗ недоступен. Повторите проверку позже.', uncertain=mutating)
         if response.status_code not in (200, 201):
+            sensitive = request_secrets(body, headers)
             try:
-                diagnostic = error_detail(response.json(), request_secrets(body, headers))
+                payload = response.json()
+                parsed = True
             except ValueError:
-                diagnostic = ''
-            message = f'{context}: HTTP {response.status_code}.'
-            message += (' ' + diagnostic) if diagnostic else ' ЧЗ не передал описание в распознанном формате.'
+                payload, parsed = None, False
+            diagnostic = response_diagnostic(response, payload, sensitive, parsed)
+            message = f'{context}: HTTP {response.status_code}. {diagnostic}'
             raise RemoteError(message,
                               uncertain=mutating and (response.status_code >= 500 or response.status_code in (408, 429)))
         try:
