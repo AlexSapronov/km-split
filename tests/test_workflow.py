@@ -265,6 +265,52 @@ async def test_rejected_report_can_be_corrected_without_emission(svc):
     await svc.prepare_reports([op['id']], True)
 
 
+async def test_superseded_rejected_report_hidden_but_retained(svc):
+    op = await issue(svc)
+    rejected = (await svc.prepare_reports([op['id']], True))[0]
+    await svc.submit(rejected['id'], 'demo')
+
+    original = svc.gateway.oms
+    async def reject_report(inn, path, *args, **kwargs):
+        if path.endswith('/report/info'):
+            return {'reportStatus': 'REJECTED'}
+        return await original(inn, path, *args, **kwargs)
+
+    svc.gateway.oms = reject_report
+    await svc.poll_report(rejected['id'])
+    assert svc.job(rejected['id'])['state'] == 'rejected'
+    assert any(j['id'] == rejected['id'] for j in svc.state()['jobs'])
+
+    svc.gateway.oms = original
+    successful = (await svc.prepare_reports([op['id']], True))[0]
+    await svc.submit(successful['id'], 'demo')
+    await svc.poll_report(successful['id'])
+
+    assert svc.operation(op['id'])['state'] == 'done'
+    assert svc.job(rejected['id'])['state'] == 'rejected'
+    assert svc.store.one('SELECT id FROM jobs WHERE id=?', (rejected['id'],)) is not None
+    assert all(j['id'] != rejected['id'] for j in svc.state()['jobs'])
+    assert all(j['id'] != rejected['id'] for j in svc.state(True)['jobs'])
+
+
+async def test_rejected_report_remains_visible_while_operation_needs_retry(svc):
+    op = await issue(svc)
+    rejected = (await svc.prepare_reports([op['id']], True))[0]
+    await svc.submit(rejected['id'], 'demo')
+
+    original = svc.gateway.oms
+    async def reject_report(inn, path, *args, **kwargs):
+        if path.endswith('/report/info'):
+            return {'reportStatus': 'REJECTED'}
+        return await original(inn, path, *args, **kwargs)
+
+    svc.gateway.oms = reject_report
+    await svc.poll_report(rejected['id'])
+
+    assert svc.operation(op['id'])['state'] == 'ready'
+    assert any(j['id'] == rejected['id'] for j in svc.state()['jobs'])
+
+
 async def test_restart_preserves_pending_and_history(svc):
     op = await issue(svc)
     replacement = Service(svc.settings, Store(svc.store.path), svc.gateway)
