@@ -16,6 +16,9 @@ class Settings:
     organizations: list[dict]
     root: Path | None = None
     file_signing_enabled: bool = False
+    signer_token: str = ''
+    signer_thumbprint: str = ''
+    internal_token: str = ''
 
     @staticmethod
     def validate_organizations(orgs):
@@ -81,7 +84,10 @@ class Settings:
         else:
             orgs = [dict(inn='7700000000', name='Демо · склад', template_id=36)]
         # user/password are retained only for source compatibility with v0.1.
-        return cls(data, mode, '', '', orgs, root, saved.get('file_signing_enabled') is True)
+        return cls(data, mode, '', '', orgs, root, saved.get('file_signing_enabled') is True,
+                   os.getenv('SPLIT_SIGNER_TOKEN', ''),
+                   os.getenv('SPLIT_SIGNER_THUMBPRINT', '').replace(' ', '').upper(),
+                   os.getenv('SPLIT_INTERNAL_TOKEN', ''))
 
     @classmethod
     def load(cls):
