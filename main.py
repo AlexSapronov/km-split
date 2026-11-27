@@ -192,7 +192,7 @@ def create_app(settings=None, gateway_factory=Gateway):
                 jobs.append(job)
             if jobs and all(job['state'] == 'done' for job in jobs):
                 update_batch(batch_id, state='done', error=None)
-            elif any(job['state'] in ('rejected', 'unknown', 'sending') for job in jobs):
+            elif any(job['state'] in ('rejected', 'unknown') for job in jobs):
                 detail = next((job.get('error') for job in jobs if job.get('error')), '')
                 update_batch(batch_id, state='failed', error=detail or 'DIVISIONMARK не подтверждён')
         return batch_payload(store.one('SELECT * FROM auto_split_batches WHERE id=?', (batch_id,)))
