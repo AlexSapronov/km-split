@@ -36,6 +36,18 @@ class Store:
             CREATE TABLE IF NOT EXISTS events (
               id INTEGER PRIMARY KEY, at TEXT NOT NULL, entity TEXT NOT NULL,
               action TEXT NOT NULL, detail TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS auto_split_batches (
+              id TEXT PRIMARY KEY, request_id TEXT UNIQUE NOT NULL, fingerprint TEXT NOT NULL,
+              source_cis TEXT NOT NULL, source_code TEXT NOT NULL, parts TEXT NOT NULL,
+              operation_ids TEXT NOT NULL DEFAULT '[]', expected_codes TEXT NOT NULL DEFAULT '[]',
+              report_job_ids TEXT NOT NULL DEFAULT '[]', state TEXT NOT NULL,
+              error TEXT, created TEXT NOT NULL, updated TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS signer_leases (
+              job_id TEXT PRIMARY KEY REFERENCES jobs(id), token TEXT NOT NULL,
+              sha256 TEXT NOT NULL, expires REAL NOT NULL);
+            CREATE TABLE IF NOT EXISTS signer_heartbeats (
+              id INTEGER PRIMARY KEY CHECK(id=1), thumbprint TEXT NOT NULL,
+              expires TEXT NOT NULL, status TEXT NOT NULL, time TEXT NOT NULL);
             ''')
         path.chmod(0o600)
 
