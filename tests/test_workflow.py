@@ -373,9 +373,10 @@ def test_internal_automatic_split_reprints_both_codes_and_waits_for_divisionmark
         assert job.status_code == 200 and job.json()['kind'] == 'order'
         signed = client.post('/api/signer/result', headers=signer_headers, json={
             'id':job.json()['id'], 'lease':job.json()['lease'], 'sha256':job.json()['sha256'],
-            'signature':base64.b64encode(b'demo-signature').decode(), 'thumbprint':'A' * 40
+            'signature':base64.b64encode(b'x' * 64).decode(), 'thumbprint':'A' * 40
         })
-        assert signed.status_code == 200 and signed.json()['state'] == 'accepted'
+        assert signed.status_code == 200, signed.text
+        assert signed.json()['state'] == 'accepted'
 
         ready = client.get('/api/internal/splits/' + batch['id'], headers=headers).json()
         assert ready['state'] == 'ready_to_rescan'
@@ -392,9 +393,10 @@ def test_internal_automatic_split_reprints_both_codes_and_waits_for_divisionmark
         assert report.status_code == 200 and report.json()['kind'] == 'report'
         submitted = client.post('/api/signer/result', headers=signer_headers, json={
             'id':report.json()['id'], 'lease':report.json()['lease'], 'sha256':report.json()['sha256'],
-            'signature':base64.b64encode(b'demo-signature').decode(), 'thumbprint':'A' * 40
+            'signature':base64.b64encode(b'x' * 64).decode(), 'thumbprint':'A' * 40
         })
-        assert submitted.status_code == 200 and submitted.json()['state'] == 'accepted'
+        assert submitted.status_code == 200, submitted.text
+        assert submitted.json()['state'] == 'accepted'
 
         done = client.get('/api/internal/splits/' + batch['id'], headers=headers).json()
         assert done['state'] == 'done'
