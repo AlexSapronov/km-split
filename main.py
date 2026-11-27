@@ -238,7 +238,7 @@ def create_app(settings=None, gateway_factory=Gateway):
             raise HTTPException(409, 'Настройте SPLIT_SIGNER_THUMBPRINT')
         with store.transaction() as db:
             db.execute('DELETE FROM signer_leases WHERE expires<?', (time.time(),))
-            row = db.execute("SELECT * FROM jobs WHERE state='prepared' ORDER BY created LIMIT 1").fetchone()
+            row = db.execute("SELECT j.* FROM jobs j WHERE j.state='prepared' AND NOT EXISTS (SELECT 1 FROM signer_leases l WHERE l.job_id=j.id) ORDER BY j.created LIMIT 1").fetchone()
             if row is None:
                 return Response(status_code=204)
             job = service.job_view(row['id'])
@@ -281,29 +281,35 @@ def create_app(settings=None, gateway_factory=Gateway):
         fingerprint = hashlib.sha256(json.dumps([code.full, body.parts], ensure_ascii=False,
                                                 separators=(',', ':')).encode()).hexdigest()
         existing = store.one('SELECT * FROM auto_split_batches WHERE request_id=?', (str(body.request_id),))
-        if existing:
-            if existing['fingerprint'] != fingerprint:
-                raise HTTPException(409, 'Идентификатор запроса уже использован с другими данными')
+        if existing and existing['fingerprint'] != fingerprint:
+            raise HTTPException(409, 'Идентификатор запроса уже использован с другими данными')
+        if existing and existing['state'] != 'creating':
             return await refresh_batch(existing['id'])
-        info = await service.gateway.info(code.full)
-        if info['status'] != 'INTRODUCED' or sum(body.parts) >= info['quantity']:
-            raise HTTPException(409, 'Разделение возможно только для КМ в обороте с положительным остатком')
-        batch_id = str(uuid4())
-        from km_split.db import now
-        with store.transaction() as db:
-            db.execute('''INSERT INTO auto_split_batches
-                (id,request_id,fingerprint,source_cis,source_code,parts,state,created,updated)
-                VALUES (?,?,?,?,?,?, 'creating',?,?)''',
-                (batch_id, str(body.request_id), fingerprint, code.cis, code.full,
-                 json.dumps(body.parts), now(), now()))
-        operation_ids = []
+        if existing:
+            batch_id = existing['id']
+            operation_ids = json.loads(existing['operation_ids'])
+        else:
+            info = await service.gateway.info(code.full)
+            if info['status'] != 'INTRODUCED' or sum(body.parts) >= info['quantity']:
+                raise HTTPException(409, 'Разделение возможно только для КМ в обороте с положительным остатком')
+            batch_id = str(uuid4())
+            from km_split.db import now
+            with store.transaction() as db:
+                db.execute('''INSERT INTO auto_split_batches
+                    (id,request_id,fingerprint,source_cis,source_code,parts,state,created,updated)
+                    VALUES (?,?,?,?,?,?, 'creating',?,?)''',
+                    (batch_id, str(body.request_id), fingerprint, code.cis, code.full,
+                     json.dumps(body.parts), now(), now()))
+            operation_ids = []
         try:
-            for index, quantity in enumerate(body.parts):
+            for index in range(len(operation_ids), len(body.parts)):
+                quantity = body.parts[index]
                 op = await service.create(code.full, quantity, str(uuid5(body.request_id, str(index))))
                 operation_ids.append(op['id'])
                 with store.transaction() as db:
                     db.execute('UPDATE auto_split_batches SET operation_ids=?,state=?,updated=? WHERE id=?',
-                               (json.dumps(operation_ids), 'ordering', now(), batch_id))
+                               (json.dumps(operation_ids), 'ordering',
+                                __import__('km_split.db', fromlist=['now']).now(), batch_id))
         except Exception as exc:
             update_batch(batch_id, operation_ids=operation_ids, state='failed',
                          error=('Часть заказов уже создана. Не повторяйте разделение; требуется разбор: ' + str(exc))[:1000])
@@ -332,6 +338,8 @@ def create_app(settings=None, gateway_factory=Gateway):
     async def confirm_internal_split(batch_id: UUID, body: InternalSplitConfirm, request: Request):
         require_internal(request)
         current = await refresh_batch(str(batch_id))
+        if current['state'] in ('reporting', 'done'):
+            return current
         if current['state'] != 'ready_to_rescan':
             raise HTTPException(409, 'Разделение ещё не готово к подтверждению этикеток')
         row = store.one('SELECT * FROM auto_split_batches WHERE id=?', (str(batch_id),))
