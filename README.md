@@ -293,7 +293,7 @@ OMS Cloud API 3.0.40, 24.09.2026:
 - § 2.3.1 — отсоединённая CMS-подпись запросов.
 
 True API: пути и форма ответов сверены с клиентом `AlexSapronov/gis-trueapi`;
-его код и рабочая база в этот репозиторий не включены.
+его код и рабочая база в этот репозиторий не включены. Для новой интеграции FIFO ГТД см. раздел выше.
 
 КриптоПро: https://docs.cryptopro.ru/cades/plugin/plugin-samples/plugin-samples-sign-detached
 и https://docs.cryptopro.ru/cades/plugin/content-encoding.
@@ -322,6 +322,20 @@ sudo systemctl restart km-split.service
 сохраняется. Пароль из старого `.env` можно удалить — он игнорируется.
 На первом рабочем запуске заполните настройки по адресу `/admin`, затем подключите ЧЗ по ЭЦП.
 Без ваших реальных OMS ID, OMS Connection и действующей ЭЦП отправка в ЧЗ невозможна.
+
+### Интеграция с GIS True API и общий Windows-подписант
+
+Для автоматического FIFO-разделения из gis-trueapi сервис km-split должен быть доступен по HTTPS. В .env задайте:
+
+- SPLIT_INTERNAL_TOKEN — отдельный случайный секрет внутреннего API; тот же секрет указывается в KM_SPLIT_INTERNAL_TOKEN на сервере gis-trueapi.
+- SPLIT_SIGNER_TOKEN — отдельный секрет подключения Windows-подписанта.
+- SPLIT_SIGNER_THUMBPRINT — SHA-1 отпечаток сертификата УКЭП, тот же, что настроен в Marking-BM и GIS True API.
+
+В gis-trueapi задайте KM_SPLIT_URL, KM_SPLIT_INTERNAL_TOKEN, GIS_SIGNER_TOKEN и GIS_SIGNER_THUMBPRINT. Каждый сервис использует собственный connection token; секреты должны быть разными. Все три отпечатка сертификата должны совпадать.
+
+Обновлённый Start-Signer.ps1 из marking-bm принимает адрес Marking-BM через -Server и GIS True API / KM Split через -AdditionalServer. При запуске вводится отдельный токен для каждого адреса. Один процесс Windows опрашивает три очереди и подписывает задания одним сертификатом.
+
+Внутренний API km-split предназначен только для gis-trueapi и защищён SPLIT_INTERNAL_TOKEN. Он создаёт идемпотентные пакетные операции, отдаёт общий PDF этикеток и отправляет DIVISIONMARK только после подтверждения повторного сканирования всех этикеток.
 
 Подпись через файл и ручной ввод Base64 по умолчанию отключены. Включить запасной способ можно в `/admin` флажком «Разрешить подпись через файл и ввод Base64».
 
