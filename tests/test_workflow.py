@@ -359,12 +359,12 @@ def test_internal_automatic_split_reprints_both_codes_and_waits_for_divisionmark
     settings.signer_thumbprint = 'A' * 40
     app = create_app(settings)
     service = app.state.service
-    headers = {'Authorization': 'Bearer internal-test-token'}
+    headers = {'Authorization': 'Bearer internal-test-token', 'X-Requested-With':'km-split'}
     signer_headers = {'Authorization': 'Bearer signer-test-token'}
     with TestClient(app) as client:
         created = client.post('/api/internal/splits', headers=headers,
                               json={'request_id':str(uuid4()), 'code':CODE, 'parts':[30]})
-        assert created.status_code == 200
+        assert created.status_code == 200, created.text
         batch = created.json()
         assert batch['state'] == 'ordering'
 
