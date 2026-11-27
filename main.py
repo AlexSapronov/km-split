@@ -176,11 +176,12 @@ def create_app(settings=None, gateway_factory=Gateway):
                     else:
                         base_code = source.full.rsplit(GS + '30', 1)[0] if source.quantity is not None else source.full
                         updated_source = with_quantity(base_code, remainder)
-                        entries = [{'code': updated_source, 'cis': parse(updated_source).cis,
-                                    'quantity': remainder, 'role': 'source', 'pn': operations[0]['pn']}]
+                        entries = []
                         for op in operations:
                             entries.append({'code': op['new_code'], 'cis': parse(op['new_code']).cis,
                                             'quantity': op['quantity'], 'role': 'new', 'pn': op['pn']})
+                        entries.append({'code': updated_source, 'cis': parse(updated_source).cis,
+                                        'quantity': remainder, 'role': 'source', 'pn': operations[0]['pn']})
                         update_batch(batch_id, expected_codes=entries, state='ready_to_rescan', error=None)
         if row['state'] == 'reporting':
             jobs = []
