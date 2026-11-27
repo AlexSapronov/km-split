@@ -201,7 +201,15 @@ def create_app(settings=None, gateway_factory=Gateway):
     async def protect(request: Request, call_next):
         if request.url.path == '/health':
             return JSONResponse({'status': 'ok'})
-        if request.method not in ('GET', 'HEAD', 'OPTIONS'):
+        service_api = request.url.path.startswith(('/api/internal/', '/api/signer/'))
+        if service_api and request.method not in ('GET', 'HEAD', 'OPTIONS'):
+            # These routes use independent bearer-token authentication; they are not browser actions.
+            length = request.headers.get('content-length', '0')
+            maximum = 1500000 if request.url.path == '/api/signer/result' else 200000
+            if not length.isdigit() or int(length) > maximum:
+                return JSONResponse({'detail': 'Слишком большой запрос'}, status_code=413)
+            response = await call_next(request)
+        elif request.method not in ('GET', 'HEAD', 'OPTIONS'):
             if request.headers.get('X-Requested-With') != 'km-split':
                 return JSONResponse({'detail': 'Обновите страницу приложения'}, status_code=403)
             origin = request.headers.get('origin')
