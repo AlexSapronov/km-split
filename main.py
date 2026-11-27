@@ -82,7 +82,17 @@ class InternalSplitConfirm(Body):
 class SignerResult(Body):
     id: str = Field(min_length=1, max_length=64)
     lease: str = Field(min_length=1, max_length=128)
-    sha256: str = Field(pattern=r'^[a-f0-9]{64}
+    sha256: str = Field(min_length=64, max_length=64)
+    signature: str = Field(min_length=1, max_length=1024 * 1024)
+    thumbprint: str = Field(min_length=40, max_length=64)
+
+
+class SignerHeartbeat(Body):
+    thumbprint: str = Field(min_length=40, max_length=64)
+    expires: str = Field(min_length=1, max_length=80)
+    status: str = Field(max_length=120)
+
+
 
 def create_app(settings=None, gateway_factory=Gateway):
     settings = settings or Settings.load()
