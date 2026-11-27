@@ -503,15 +503,6 @@ def create_app(settings=None, gateway_factory=Gateway):
 
     app.mount('/static', StaticFiles(directory=ROOT / 'static'), name='static')
     return app
-)
-    signature: str = Field(min_length=1, max_length=1024 * 1024)
-    thumbprint: str = Field(min_length=40, max_length=64)
-
-
-class SignerHeartbeat(Body):
-    thumbprint: str = Field(min_length=40, max_length=64)
-    expires: str = Field(min_length=1, max_length=80)
-    status: str = Field(max_length=120)
 
 
 def create_app(settings=None, gateway_factory=Gateway):
