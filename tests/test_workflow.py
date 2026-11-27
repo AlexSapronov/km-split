@@ -353,6 +353,53 @@ def test_no_login_csrf_and_secrets(settings):
         assert 'demo-token' not in payload
 
 
+def test_internal_automatic_split_reprints_both_codes_and_waits_for_divisionmark(settings):
+    settings.internal_token = 'internal-test-token'
+    settings.signer_token = 'signer-test-token'
+    settings.signer_thumbprint = 'A' * 40
+    app = create_app(settings)
+    service = app.state.service
+    headers = {'Authorization': 'Bearer internal-test-token'}
+    signer_headers = {'Authorization': 'Bearer signer-test-token'}
+    with TestClient(app) as client:
+        created = client.post('/api/internal/splits', headers=headers,
+                              json={'request_id':str(uuid4()), 'code':CODE, 'parts':[30]})
+        assert created.status_code == 200
+        batch = created.json()
+        assert batch['state'] == 'ordering'
+
+        # The common Windows signer claims and submits the prepared OMS order.
+        job = client.post('/api/signer/next', headers=signer_headers, json={})
+        assert job.status_code == 200 and job.json()['kind'] == 'order'
+        signed = client.post('/api/signer/result', headers=signer_headers, json={
+            'id':job.json()['id'], 'lease':job.json()['lease'], 'sha256':job.json()['sha256'],
+            'signature':base64.b64encode(b'demo-signature').decode(), 'thumbprint':'A' * 40
+        })
+        assert signed.status_code == 200 and signed.json()['state'] == 'accepted'
+
+        ready = client.get('/api/internal/splits/' + batch['id'], headers=headers).json()
+        assert ready['state'] == 'ready_to_rescan'
+        assert [item['role'] for item in ready['expected_codes']] == ['source', 'new']
+        labels = client.get('/api/internal/splits/' + batch['id'] + '/labels.pdf', headers=headers)
+        assert labels.status_code == 200
+        assert len(PdfReader(BytesIO(labels.content)).pages) == 2
+
+        confirmed = client.post('/api/internal/splits/' + batch['id'] + '/confirm', headers=headers,
+                                json={'scanned_cis':[item['cis'] for item in ready['expected_codes']]})
+        assert confirmed.status_code == 200 and confirmed.json()['state'] == 'reporting'
+
+        report = client.post('/api/signer/next', headers=signer_headers, json={})
+        assert report.status_code == 200 and report.json()['kind'] == 'report'
+        submitted = client.post('/api/signer/result', headers=signer_headers, json={
+            'id':report.json()['id'], 'lease':report.json()['lease'], 'sha256':report.json()['sha256'],
+            'signature':base64.b64encode(b'demo-signature').decode(), 'thumbprint':'A' * 40
+        })
+        assert submitted.status_code == 200 and submitted.json()['state'] == 'accepted'
+
+        done = client.get('/api/internal/splits/' + batch['id'], headers=headers).json()
+        assert done['state'] == 'done'
+
+
 def test_modes_cannot_share_database(settings):
     create_app(settings)
     settings.mode='live'
