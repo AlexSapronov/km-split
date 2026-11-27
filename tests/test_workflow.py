@@ -379,7 +379,7 @@ def test_internal_automatic_split_reprints_both_codes_and_waits_for_divisionmark
 
         ready = client.get('/api/internal/splits/' + batch['id'], headers=headers).json()
         assert ready['state'] == 'ready_to_rescan'
-        assert [item['role'] for item in ready['expected_codes']] == ['source', 'new']
+        assert [item['role'] for item in ready['expected_codes']] == ['new', 'source']
         labels = client.get('/api/internal/splits/' + batch['id'] + '/labels.pdf', headers=headers)
         assert labels.status_code == 200
         assert len(PdfReader(BytesIO(labels.content)).pages) == 2
